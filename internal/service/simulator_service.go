@@ -126,7 +126,7 @@ func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *Sim
 		if err != nil {
 			logger.Error("live trading disabled — credential error", "err", err)
 		} else {
-			logger.Info("LIVE TRADING ENABLED", "eoa", trader.EOAAddress(), "proxy", cfg.ProxyWallet)
+			logger.Info("LIVE TRADING ENABLED")
 			engine.SetLiveTradeCallback(func(ctx context.Context, tokenID string, direction simulator.Direction, amountUSD, entryPrice float64) {
 				result, err := trader.PlaceMarketOrder(ctx, tokenID, amountUSD, entryPrice)
 				if err != nil {

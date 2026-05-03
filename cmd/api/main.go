@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/silver/pmvibes/internal/logging"
 	"github.com/silver/pmvibes/internal/server"
 	"github.com/silver/pmvibes/internal/store"
 )
@@ -15,9 +16,9 @@ import (
 func main() {
 	loadDotEnv()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	logger := slog.New(logging.NewHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
-	}))
+	})))
 	slog.SetDefault(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
