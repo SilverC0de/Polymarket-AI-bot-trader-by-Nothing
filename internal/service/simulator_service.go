@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -103,6 +104,93 @@ func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *Sim
 		startTime:  time.Now(),
 		logs:       make([]LogEntry, 0),
 		eventLog:   eventLog,
+	}
+
+	// Wire up live trading if LIVE_TRADING=true and all credentials are present.
+	if strings.EqualFold(os.Getenv("LIVE_TRADING"), "true") {
+		sigType := polymarket.SigTypePolyProxy // default: Telegram/email/Google (Magic Link)
+		if v := os.Getenv("POLYMARKET_SIG_TYPE"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				sigType = n
+			}
+		}
+		cfg := polymarket.TraderConfig{
+			PrivateKeyHex: os.Getenv("POLYMARKET_PRIVATE_KEY"),
+			ProxyWallet:   os.Getenv("POLYMARKET_PROXY_WALLET"),
+			APIKey:        os.Getenv("POLYMARKET_API_KEY"),
+			APISecret:     os.Getenv("POLYMARKET_API_SECRET"),
+			APIPassphrase: os.Getenv("POLYMARKET_API_PASSPHRASE"),
+			SignatureType: sigType,
+		}
+		trader, err := polymarket.NewTrader(cfg)
+		if err != nil {
+			logger.Error("live trading disabled — credential error", "err", err)
+		} else {
+			logger.Info("LIVE TRADING ENABLED", "eoa", trader.EOAAddress(), "proxy", cfg.ProxyWallet)
+			engine.SetLiveTradeCallback(func(ctx context.Context, tokenID string, direction simulator.Direction, amountUSD, entryPrice float64) {
+				result, err := trader.PlaceMarketOrder(ctx, tokenID, amountUSD, entryPrice)
+				if err != nil {
+					logger.Error("live order FAILED",
+						"direction", direction, "tokenID", tokenID,
+						"amountUSD", amountUSD, "entryPrice", entryPrice,
+						"err", err)
+					s.addLog("ERROR", fmt.Sprintf("LIVE ORDER FAILED: %s $%.2f @ %.4f — %v", direction, amountUSD, entryPrice, err))
+					return
+				}
+				logger.Info("live order PLACED",
+					"direction", direction, "orderID", result.OrderID, "status", result.Status)
+				s.addLog("INFO", fmt.Sprintf("LIVE ORDER PLACED: %s $%.2f @ %.4f — orderID: %s",
+					direction, amountUSD, entryPrice, result.OrderID))
+
+				// FAK orders settle almost immediately; poll for the actual fill.
+				if result.OrderID == "" {
+					return
+				}
+				go func(orderID string) {
+					// Give the CLOB up to ~3 seconds to settle the FAK order.
+					ticker := time.NewTicker(500 * time.Millisecond)
+					defer ticker.Stop()
+					deadline := time.After(3 * time.Second)
+					for {
+						select {
+						case <-deadline:
+							s.addLog("WARN", fmt.Sprintf("FILL CHECK TIMEOUT: orderID %s — check polymarket.com/profile manually", orderID))
+							return
+						case <-ticker.C:
+							pollCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+							status, err := trader.GetOrderStatus(pollCtx, orderID)
+							cancel()
+							if err != nil {
+								logger.Warn("fill check error", "orderID", orderID, "err", err)
+								continue
+							}
+							if status.Status == "live" {
+								continue // not settled yet
+							}
+							filledUSD := status.FilledUSD()
+							filledShares := status.FilledShares()
+							fillPrice := status.FillPrice()
+							if filledUSD > 0 {
+								logger.Info("live order FILLED",
+									"direction", direction, "orderID", orderID,
+									"filledUSD", filledUSD, "filledShares", filledShares,
+									"fillPrice", fillPrice, "status", status.Status)
+								s.addLog("INFO", fmt.Sprintf("LIVE ORDER FILLED: %s — $%.4f spent, %.4f shares @ %.4f (status: %s)",
+									direction, filledUSD, filledShares, fillPrice, status.Status))
+							} else {
+								logger.Info("live order CANCELLED (no fill)",
+									"direction", direction, "orderID", orderID, "status", status.Status)
+								s.addLog("WARN", fmt.Sprintf("LIVE ORDER CANCELLED (no fill): %s orderID %s — insufficient liquidity?",
+									direction, orderID))
+							}
+							return
+						}
+					}
+				}(result.OrderID)
+			})
+		}
+	} else {
+		logger.Info("simulation mode — set LIVE_TRADING=true to place real orders")
 	}
 
 	// Set up engine callbacks

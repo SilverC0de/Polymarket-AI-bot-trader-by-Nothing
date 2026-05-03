@@ -82,6 +82,11 @@ type MarketOutcome struct {
 	OurPnL        float64
 }
 
+// LiveTradeFunc is called immediately when the strategy fires a signal, before
+// the simulated trade is recorded.  tokenID is the outcome token to buy.
+// The function runs in its own goroutine; errors should be logged by the caller.
+type LiveTradeFunc func(ctx context.Context, tokenID string, direction Direction, amountUSD, entryPrice float64)
+
 // Engine runs the trading simulation.
 type Engine struct {
 	mu             sync.RWMutex
@@ -96,6 +101,7 @@ type Engine struct {
 	onTradeUpdate  func(trade SimulatedTrade)
 	onSkip         func(skip SkippedMarket)
 	onMarketEnd    func(outcome MarketOutcome)
+	onLiveTrade    LiveTradeFunc // nil when not in live-trading mode
 }
 
 // NewEngine creates a new simulation engine.
@@ -125,6 +131,12 @@ func (e *Engine) SetSkipCallback(fn func(skip SkippedMarket)) {
 // SetMarketEndCallback sets a callback for when markets resolve.
 func (e *Engine) SetMarketEndCallback(fn func(outcome MarketOutcome)) {
 	e.onMarketEnd = fn
+}
+
+// SetLiveTradeCallback registers the function called when a strategy signal fires.
+// Pass nil to disable live trading and revert to simulation-only mode.
+func (e *Engine) SetLiveTradeCallback(fn LiveTradeFunc) {
+	e.onLiveTrade = fn
 }
 
 // GetOrCreateMarketState gets or creates a market state.
@@ -299,6 +311,17 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 
 			if e.onTradeUpdate != nil {
 				go e.onTradeUpdate(trade)
+			}
+
+			// Dispatch live order if configured.
+			if e.onLiveTrade != nil {
+				tokenID := state.UpTokenID
+				if direction == DirectionDown {
+					tokenID = state.DownTokenID
+				}
+				if tokenID != "" {
+					go e.onLiveTrade(context.Background(), tokenID, direction, e.strategy.config.TradeSize, entryPrice)
+				}
 			}
 		}
 	}
