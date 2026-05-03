@@ -3,15 +3,17 @@ package polymarket
 import (
 	"bytes"
 	"context"
-	cryptorand "crypto/rand"
 	"crypto/ecdsa"
 	"crypto/hmac"
+	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"math"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -37,6 +39,11 @@ const exchangeV2Contract = "0xE111180000d2663C0091e4f400237545B87B996B"
 const orderTypeString = "Order(uint256 salt,address maker,address signer,uint256 tokenId," +
 	"uint256 makerAmount,uint256 takerAmount,uint8 side,uint8 signatureType," +
 	"uint256 timestamp,bytes32 metadata,bytes32 builder)"
+
+const (
+	defaultTickSize   = 0.01
+	maxBinaryBuyPrice = 0.99
+)
 
 // TraderConfig holds all credentials needed for live order placement.
 type TraderConfig struct {
@@ -137,7 +144,7 @@ func NewTrader(config TraderConfig) (*Trader, error) {
 // EOAAddress returns the public address derived from the private key.
 func (t *Trader) EOAAddress() string { return t.eoaAddress.Hex() }
 
-// PlaceMarketOrder submits a FOK (Fill or Kill) market buy order on CLOB V2.
+// PlaceMarketOrder submits a FAK (Fill and Kill) market buy order on CLOB V2.
 //
 //   - tokenID     – outcome token to buy (decimal string from Polymarket's clobTokenIds)
 //   - amountUSD   – pUSD to spend (e.g. 10.0 for $10)
@@ -152,17 +159,9 @@ func (t *Trader) PlaceMarketOrder(ctx context.Context, tokenID string, amountUSD
 		return nil, fmt.Errorf("cannot parse tokenID %q as decimal integer", tokenID)
 	}
 
-	// pUSD uses 6 decimal places, same as USDC.
-	makerAmount := int64(amountUSD * 1_000_000)
-	// Accept execution at up to 5% worse than the current ask price (slippage guard).
-	// Higher worst-price → lower takerAmount → more likely to fill on a FAK.
-	// Clamp: binary outcome tokens pay at most $1, so the implied price
-	// (makerAmount / takerAmount) must never exceed 1.0.  When entryPrice ≥ ~0.952
-	// the 5% slippage would push the worst-price above $1, producing an invalid
-	// payload that the CLOB rejects.  In that case accept the current price as-is.
-	takerAmount := int64(float64(makerAmount) / (entryPrice * 1.05))
-	if takerAmount < makerAmount {
-		takerAmount = makerAmount
+	makerAmount, takerAmount, err := marketBuyAmounts(amountUSD, entryPrice)
+	if err != nil {
+		return nil, err
 	}
 
 	salt := randomSalt()
@@ -212,9 +211,15 @@ func (t *Trader) PlaceMarketOrder(ctx context.Context, tokenID string, amountUSD
 	if err != nil {
 		return nil, fmt.Errorf("marshal order body: %w", err)
 	}
+	payload := string(bodyJSON)
+	slog.InfoContext(ctx, "clob order payload",
+		"payload", payload,
+		"entryPrice", entryPrice,
+		"limitPrice", float64(makerAmount)/float64(takerAmount),
+		"amountUSD", amountUSD)
 
 	path := "/order"
-	headers := t.l2AuthHeaders("POST", path, string(bodyJSON))
+	headers := t.l2AuthHeaders("POST", path, payload)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, clobBaseURL+path, bytes.NewReader(bodyJSON))
 	if err != nil {
@@ -236,9 +241,46 @@ func (t *Trader) PlaceMarketOrder(ctx context.Context, tokenID string, amountUSD
 	_ = json.Unmarshal(respBytes, &result)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		slog.ErrorContext(ctx, "clob order rejected",
+			"status", resp.StatusCode,
+			"response", string(respBytes),
+			"payload", payload)
 		return &result, fmt.Errorf("CLOB %d: %s", resp.StatusCode, string(respBytes))
 	}
 	return &result, nil
+}
+
+func marketBuyAmounts(amountUSD, entryPrice float64) (int64, int64, error) {
+	if amountUSD <= 0 {
+		return 0, 0, fmt.Errorf("amountUSD %f must be positive", amountUSD)
+	}
+
+	// Market buys are still limit orders: price is the worst acceptable fill.
+	// BTC 5m markets normally trade on a 1c tick, so keep the signed ratio on-tick
+	// and never submit the invalid $1.00 binary-token price.
+	worstPrice := math.Ceil(entryPrice*1.05/defaultTickSize) * defaultTickSize
+	if worstPrice > maxBinaryBuyPrice {
+		worstPrice = maxBinaryBuyPrice
+	}
+	if worstPrice < defaultTickSize {
+		worstPrice = defaultTickSize
+	}
+
+	priceTicks := int64(math.Round(worstPrice / defaultTickSize))
+	tickUnits := int64(math.Round(1 / defaultTickSize))
+	if priceTicks <= 0 || tickUnits <= 0 || priceTicks >= tickUnits {
+		return 0, 0, fmt.Errorf("worst price %.4f cannot be represented on tick %.4f", worstPrice, defaultTickSize)
+	}
+
+	budgetMicros := int64(math.Floor(amountUSD * 1_000_000))
+	unitLots := budgetMicros / priceTicks
+	if unitLots <= 0 {
+		return 0, 0, fmt.Errorf("amountUSD %.6f too small for price %.4f", amountUSD, worstPrice)
+	}
+
+	makerAmount := unitLots * priceTicks
+	takerAmount := unitLots * tickUnits
+	return makerAmount, takerAmount, nil
 }
 
 // GetOrderStatus fetches the current status of an order from CLOB V2.
