@@ -155,8 +155,15 @@ func (t *Trader) PlaceMarketOrder(ctx context.Context, tokenID string, amountUSD
 	// pUSD uses 6 decimal places, same as USDC.
 	makerAmount := int64(amountUSD * 1_000_000)
 	// Accept execution at up to 5% worse than the current ask price (slippage guard).
-	// Higher worst-price → lower takerAmount → more likely to fill on a FOK.
+	// Higher worst-price → lower takerAmount → more likely to fill on a FAK.
+	// Clamp: binary outcome tokens pay at most $1, so the implied price
+	// (makerAmount / takerAmount) must never exceed 1.0.  When entryPrice ≥ ~0.952
+	// the 5% slippage would push the worst-price above $1, producing an invalid
+	// payload that the CLOB rejects.  In that case accept the current price as-is.
 	takerAmount := int64(float64(makerAmount) / (entryPrice * 1.05))
+	if takerAmount < makerAmount {
+		takerAmount = makerAmount
+	}
 
 	salt := randomSalt()
 	tsMs := new(big.Int).SetInt64(time.Now().UnixMilli())

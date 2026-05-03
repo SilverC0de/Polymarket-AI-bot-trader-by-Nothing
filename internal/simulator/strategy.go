@@ -76,7 +76,7 @@ func DefaultStrategyConfig() StrategyConfig {
 		MaxPriceDiff:        120.0,
 		MinTimeToEnd:        20 * time.Second,
 		MaxTimeToEnd:        2 * time.Minute,
-		TradeSize:           10.0,
+		TradeSize:           20.0,
 		TrendSampleCount:    5,
 		MomentumSamples:     3,    // Check last 3 samples
 		MinMomentum:         0.5,  // Must be moving away at $0.50/sec minimum
