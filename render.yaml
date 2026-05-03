@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: pmvibes
+    runtime: go
+    buildCommand: go build -o app ./cmd/api
+    startCommand: ./app
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: REDIS_URL
+        sync: false  # set manually in Render dashboard
