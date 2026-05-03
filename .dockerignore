@@ -1,0 +1,8 @@
+.env
+.git
+.gitignore
+*.md
+scripts/node_modules
+simulator/
+fly.toml
+render.yaml
