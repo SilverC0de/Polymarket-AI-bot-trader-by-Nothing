@@ -27,6 +27,18 @@ const HistoryPageSize int64 = 200
 // chainlink BTC stream pushes well under 1Hz, so 15s is generous.
 const PriceStaleAfter = 15 * time.Second
 
+// readableTimeLayout matches e.g. "2026-05-03 1:05 am" (12-hour clock, no leading zero on hour).
+const readableTimeLayout = "2006-01-02 3:04 pm"
+
+// Polymarket uses Eastern US time for operational/market-facing windows.
+var polymarketTZ = func() *time.Location {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}()
+
 // SimulatorService manages the BTC 5m trading simulation.
 type SimulatorService struct {
 	mu          sync.RWMutex
@@ -54,7 +66,8 @@ type LogEntry struct {
 
 // SimulatorStatus is the response for /finance endpoint.
 type SimulatorStatus struct {
-	ServerTime   time.Time                  `json:"server_time"`
+	ServerTime     string `json:"server_time"`
+	PolymarketTime string `json:"polymarket_time"`
 	Running      bool                       `json:"running"`
 	Uptime       string                     `json:"uptime"`
 	CurrentPrice float64                    `json:"current_btc_price"`
@@ -439,8 +452,10 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 	stats := s.engine.GetStats()
 	target, timeToEnd, hasTarget := s.engine.GetClosestMarketTarget()
 
+	now := time.Now()
 	status := SimulatorStatus{
-		ServerTime:       time.Now(),
+		ServerTime:       now.Format(readableTimeLayout),
+		PolymarketTime:   now.In(polymarketTZ).Format(readableTimeLayout),
 		Running:          running,
 		Uptime:           time.Since(startTime).Round(time.Second).String(),
 		CurrentPrice:     currentPrice,
