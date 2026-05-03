@@ -8,11 +8,7 @@ An automated trading bot for Polymarket's **BTC 5-minute** binary markets. The b
 
 1. **Market discovery** — polls the Polymarket Gamma API to find open BTC 5-minute rounds.
 2. **Price streaming** — subscribes to a WebSocket price feed for real-time BTC data.
-3. **Strategy evaluation** — on each tick the engine checks:
-   - The BTC price is between **$40 and $120** away from the round's target.
-   - The round ends in **20 seconds to 2 minutes**.
-   - No sideways/swing/overextension conditions are active.
-   - Momentum and trend signals confirm a directional move.
+3. **Strategy evaluation** — on each tick the engine checks timing, price distance, momentum, trend, and overextension conditions to determine a directional signal.
 4. **Order execution** — in live mode, places a CLOB order through Polymarket's API with your proxy wallet.
 5. **Event persistence** — trades, skips, and outcomes are stored in memory or Redis.
 
@@ -157,20 +153,6 @@ go run ./cmd/api
 ```
 
 The `SimulatorService` will wire up `polymarket.Trader` and submit real CLOB orders when the strategy fires.
-
----
-
-## Strategy defaults
-
-| Parameter | Default |
-|-----------|---------|
-| Min distance from target | $40 |
-| Max distance from target | $120 |
-| Entry window (before round end) | 20s – 2m |
-| Order size | $10 |
-| Trend samples | 5 |
-| Momentum samples | 3 (min $0.50/s) |
-| Overextension lookback | $12 move in 60s |
 
 ---
 
