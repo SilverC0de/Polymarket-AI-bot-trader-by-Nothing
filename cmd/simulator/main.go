@@ -27,7 +27,7 @@ const (
 ║  • Entry window: 20s-2min before market end                         ║
 ║  • Skip sideways markets (price crossed target both ways)           ║
 ║  • Follow trend: UP trend → bet UP, DOWN trend → bet DOWN           ║
-║  • Trade size: $5 per trade                                         ║
+║  • Trade size: $10 per trade                                        ║
 ╚══════════════════════════════════════════════════════════════════════╝
 `
 )

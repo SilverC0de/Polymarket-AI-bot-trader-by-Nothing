@@ -61,7 +61,7 @@ type StrategyConfig struct {
 	MaxPriceDiff        float64       // Maximum price difference from target ($120)
 	MinTimeToEnd        time.Duration // Minimum time before market ends (1 min)
 	MaxTimeToEnd        time.Duration // Maximum time before market ends (3 min)
-	TradeSize           float64       // Trade size in USD ($5)
+	TradeSize           float64       // Trade size in USD ($10)
 	TrendSampleCount    int           // Number of samples to determine trend
 	MomentumSamples     int           // Number of recent samples for momentum check
 	MinMomentum         float64       // Minimum $/sec momentum away from target
@@ -76,7 +76,7 @@ func DefaultStrategyConfig() StrategyConfig {
 		MaxPriceDiff:        120.0,
 		MinTimeToEnd:        20 * time.Second,
 		MaxTimeToEnd:        2 * time.Minute,
-		TradeSize:           5.0,
+		TradeSize:           10.0,
 		TrendSampleCount:    5,
 		MomentumSamples:     3,    // Check last 3 samples
 		MinMomentum:         0.5,  // Must be moving away at $0.50/sec minimum

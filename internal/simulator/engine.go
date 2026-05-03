@@ -35,7 +35,7 @@ type SimulatedTrade struct {
 	PriceToBeat    float64   // BTC price at market start
 	EntryBTCPrice  float64   // BTC price when trade was entered
 	EntryReason    string
-	TradeSize      float64      // USD amount ($5)
+	TradeSize      float64      // USD amount ($10)
 	EntryPrice     float64      // Price paid for the outcome token (e.g., 0.55)
 	RealOrderBook  bool         // True if EntryPrice came from real order book, false if simulated
 	Outcome        TradeOutcome // WIN, LOSE, or PENDING
