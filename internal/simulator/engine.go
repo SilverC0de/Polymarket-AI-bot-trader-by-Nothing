@@ -304,17 +304,22 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 	}
 }
 
-// calculateEntryPrice simulates the entry price for a trade.
-func (e *Engine) calculateEntryPrice(btcPrice, priceToBeat float64, direction Direction) float64 {
+// calculateEntryPrice simulates the entry price when the order book is unavailable.
+// Maps abs diff from [MinPriceDiff, MaxPriceDiff] to entry probability ~0.50–0.65.
+func (e *Engine) calculateEntryPrice(btcPrice, priceToBeat float64, _ Direction) float64 {
 	diff := btcPrice - priceToBeat
 	absDiff := diff
 	if absDiff < 0 {
 		absDiff = -absDiff
 	}
 
-	// Map $30-60 diff to 0.50-0.65 entry price
-	// Higher diff = more confident = pay more
-	ratio := (absDiff - 30) / 30 // 0 to 1
+	minD := e.strategy.config.MinPriceDiff
+	maxD := e.strategy.config.MaxPriceDiff
+	span := maxD - minD
+	if span <= 0 {
+		span = 1
+	}
+	ratio := (absDiff - minD) / span
 	if ratio > 1 {
 		ratio = 1
 	}
@@ -322,7 +327,6 @@ func (e *Engine) calculateEntryPrice(btcPrice, priceToBeat float64, direction Di
 		ratio = 0
 	}
 
-	// Entry price between 0.50 and 0.65
 	return 0.50 + (ratio * 0.15)
 }
 

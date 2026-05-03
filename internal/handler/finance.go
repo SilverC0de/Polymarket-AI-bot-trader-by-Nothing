@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -10,16 +10,16 @@ import (
 )
 
 type FinanceHandler struct {
-	svc    *service.FinanceService
 	simSvc *service.SimulatorService
+	log    *slog.Logger
 }
 
-func NewFinanceHandler(svc *service.FinanceService, simSvc *service.SimulatorService) *FinanceHandler {
-	return &FinanceHandler{svc: svc, simSvc: simSvc}
+func NewFinanceHandler(simSvc *service.SimulatorService, log *slog.Logger) *FinanceHandler {
+	return &FinanceHandler{simSvc: simSvc, log: log}
 }
 
 // GetStatus returns the current simulation status and breakdown.
-// Query history_limit (0–MaxFinanceHistoryLimit): when REDIS_URL is set, includes persisted_total and persisted_events (newest first).
+// Query history_limit (0–MaxFinanceHistoryLimit): includes persisted_total and persisted_events (newest first).
 func (h *FinanceHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	if h.simSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "simulator not initialized")
@@ -30,39 +30,62 @@ func (h *FinanceHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, status)
 }
 
-// FinanceHistoryResponse is GET /finance/history JSON body.
+// FinanceHistoryResponse is GET /finance/history/{page} JSON body.
 type FinanceHistoryResponse struct {
-	Total  int64                  `json:"total"`
-	Offset int64                  `json:"offset"`
-	Limit  int64                  `json:"limit"`
-	Events []store.PersistedEvent `json:"events"`
+	Total      int64                  `json:"total"`
+	Page       int64                  `json:"page"`
+	PageSize   int64                  `json:"page_size"`
+	TotalPages int64                  `json:"total_pages"`
+	Events     []store.PersistedEvent `json:"events"`
 }
 
-// GetHistory returns paginated persisted simulation events from Redis (offset from newest).
+// GetHistory returns one page of persisted simulation events (newest first; page 1 = newest).
 func (h *FinanceHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	if h.simSvc == nil {
+		h.log.Warn("GET /finance/history", "status", http.StatusServiceUnavailable, "reason", "simulator not initialized")
 		writeError(w, http.StatusServiceUnavailable, "simulator not initialized")
 		return
 	}
-	offset := clampQueryInt64(r.URL.Query().Get("offset"), 0, 0, 1_000_000)
-	limit := clampQueryInt64(r.URL.Query().Get("limit"), 200, 1, service.MaxFinanceHistoryLimit)
+	rawPage := r.PathValue("page")
+	page, err := strconv.ParseUint(rawPage, 10, 64)
+	if err != nil || page < 1 {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	pageSize := service.HistoryPageSize
+	offset := (int64(page) - 1) * pageSize
 
 	ctx := r.Context()
 	total, err := h.simSvc.PersistedLen(ctx)
 	if err != nil {
+		h.log.Error("GET /finance/history", "step", "persisted_len", "err", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	events, err := h.simSvc.PersistedPaged(ctx, offset, limit)
+	events, err := h.simSvc.PersistedPaged(ctx, offset, pageSize)
 	if err != nil {
+		h.log.Error("GET /finance/history", "step", "persisted_paged", "err", err, "page", page, "offset", offset)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	var totalPages int64
+	if total > 0 {
+		totalPages = (total + pageSize - 1) / pageSize
+	}
+	h.log.Info("GET /finance/history",
+		"status", http.StatusOK,
+		"remote", r.RemoteAddr,
+		"page", page,
+		"page_size", pageSize,
+		"total", total,
+		"returned", len(events),
+	)
 	writeJSON(w, http.StatusOK, FinanceHistoryResponse{
-		Total:  total,
-		Offset: offset,
-		Limit:  limit,
-		Events: events,
+		Total:      total,
+		Page:       int64(page),
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+		Events:     events,
 	})
 }
 
@@ -78,63 +101,4 @@ func parseHistoryLimit(raw string) int {
 		return service.MaxFinanceHistoryLimit
 	}
 	return n
-}
-
-func clampQueryInt64(raw string, defaultVal, minVal, maxVal int64) int64 {
-	if raw == "" {
-		return defaultVal
-	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return defaultVal
-	}
-	if n < minVal {
-		return minVal
-	}
-	if n > maxVal {
-		return maxVal
-	}
-	return n
-}
-
-// GetPositions returns all current open positions.
-func (h *FinanceHandler) GetPositions(w http.ResponseWriter, r *http.Request) {
-	positions, err := h.svc.GetOpenPositions(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, positions)
-}
-
-// GetPredictions returns the latest 5-minute crypto market predictions from Polymarket.
-func (h *FinanceHandler) GetPredictions(w http.ResponseWriter, r *http.Request) {
-	market := r.URL.Query().Get("market")
-	if market == "" {
-		writeError(w, http.StatusBadRequest, "market query param is required")
-		return
-	}
-
-	predictions, err := h.svc.GetPredictions(r.Context(), market)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, predictions)
-}
-
-// ExecuteTrade places a trade on Polymarket based on the 5-minute prediction signal.
-func (h *FinanceHandler) ExecuteTrade(w http.ResponseWriter, r *http.Request) {
-	var req service.TradeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	result, err := h.svc.ExecuteTrade(r.Context(), req)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
 }

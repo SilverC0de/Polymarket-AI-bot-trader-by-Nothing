@@ -23,8 +23,8 @@ const (
 ║          POLYMARKET BTC 5-MIN TRADING SIMULATOR                      ║
 ║                                                                      ║
 ║  Strategy Rules:                                                     ║
-║  • Price diff from target must be $30-$60                           ║
-║  • Entry window: 30s-3min before market end                         ║
+║  • Price diff from target: $40–$120 (DefaultStrategyConfig)          ║
+║  • Entry window: 20s-2min before market end                         ║
 ║  • Skip sideways markets (price crossed target both ways)           ║
 ║  • Follow trend: UP trend → bet UP, DOWN trend → bet DOWN           ║
 ║  • Trade size: $5 per trade                                         ║

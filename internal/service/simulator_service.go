@@ -15,8 +15,11 @@ import (
 	"github.com/silver/pmvibes/pkg/polymarket"
 )
 
-// MaxFinanceHistoryLimit caps persisted rows returned from GET /finance (history_limit) and GET /finance/history.
+// MaxFinanceHistoryLimit caps persisted rows returned from GET /finance (history_limit).
 const MaxFinanceHistoryLimit = 10000
+
+// HistoryPageSize is the number of events per GET /finance/history/{page}.
+const HistoryPageSize int64 = 200
 
 // PriceStaleAfter is how long without a price tick before we treat the feed as
 // unhealthy and stop creating/resolving markets against it. The Polymarket
@@ -38,7 +41,7 @@ type SimulatorService struct {
 	startTime     time.Time
 	logs          []LogEntry
 
-	eventLog *store.EventLog
+	eventLog store.EventRecorder
 }
 
 // LogEntry represents a log message.
@@ -68,7 +71,7 @@ type SimulatorStatus struct {
 	Trades       []simulator.SimulatedTrade `json:"trades"`
 	Outcomes     []simulator.MarketOutcome  `json:"market_outcomes"`
 
-	// PersistedTotal is Redis LLEN when REDIS_URL is set (full audit trail length).
+	// PersistedTotal is the in-memory event count (each append is also logged to stdout).
 	PersistedTotal int64 `json:"persisted_total,omitempty"`
 	// PersistedEvents is filled when the client passes history_limit on GET /finance.
 	PersistedEvents []store.PersistedEvent `json:"persisted_events,omitempty"`
@@ -87,7 +90,7 @@ type SimStats struct {
 }
 
 // NewSimulatorService creates a new simulator service.
-func NewSimulatorService(logger *slog.Logger, eventLog *store.EventLog) *SimulatorService {
+func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *SimulatorService {
 	client := polymarket.NewClient()
 	strategy := simulator.NewStrategy(simulator.DefaultStrategyConfig())
 	engine := simulator.NewEngine(strategy, client) // Pass client for real order book prices
@@ -322,7 +325,7 @@ func (s *SimulatorService) marketResolutionLoop(ctx context.Context) {
 }
 
 // GetStatus returns the current simulation status.
-// When historyLimit > 0 and Redis is configured, PersistedTotal and PersistedEvents are filled (newest first).
+// When historyLimit > 0, PersistedTotal and PersistedEvents are filled from the configured event log (newest first).
 func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) SimulatorStatus {
 	s.mu.RLock()
 	currentPrice := s.currentPrice
@@ -393,7 +396,7 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 	return status
 }
 
-// PersistedRecent returns newest persisted events from Redis (newest first).
+// PersistedRecent returns newest persisted events (newest first).
 func (s *SimulatorService) PersistedRecent(ctx context.Context, limit int64) ([]store.PersistedEvent, error) {
 	if s.eventLog == nil {
 		return nil, nil
@@ -409,7 +412,7 @@ func (s *SimulatorService) PersistedPaged(ctx context.Context, offset, limit int
 	return s.eventLog.ListRange(ctx, offset, limit)
 }
 
-// PersistedLen returns total persisted events in Redis.
+// PersistedLen returns total persisted events held in memory for this process.
 func (s *SimulatorService) PersistedLen(ctx context.Context) (int64, error) {
 	if s.eventLog == nil {
 		return 0, nil

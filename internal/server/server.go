@@ -9,7 +9,6 @@ import (
 	"github.com/silver/pmvibes/internal/handler"
 	"github.com/silver/pmvibes/internal/service"
 	"github.com/silver/pmvibes/internal/store"
-	"github.com/silver/pmvibes/pkg/polymarket"
 )
 
 type Config struct {
@@ -17,43 +16,52 @@ type Config struct {
 }
 
 type Server struct {
-	cfg      Config
-	router   *http.ServeMux
-	simSvc   *service.SimulatorService
-	logger   *slog.Logger
-	eventLog *store.EventLog
+	cfg           Config
+	router        *http.ServeMux
+	allowedRoutes map[string]struct{}
+	simSvc        *service.SimulatorService
+	logger        *slog.Logger
+	eventLog      store.EventRecorder
 }
 
-func New(cfg Config, logger *slog.Logger, eventLog *store.EventLog) *Server {
+func New(cfg Config, logger *slog.Logger, eventLog store.EventRecorder) *Server {
 	s := &Server{
-		cfg:      cfg,
-		router:   http.NewServeMux(),
-		logger:   logger,
-		eventLog: eventLog,
+		cfg:           cfg,
+		router:        http.NewServeMux(),
+		allowedRoutes: make(map[string]struct{}),
+		logger:        logger,
+		eventLog:      eventLog,
 	}
 	s.registerRoutes()
 	return s
 }
 
 func (s *Server) registerRoutes() {
-	pmClient := polymarket.NewClient()
-	financeSvc := service.NewFinanceService(pmClient)
-
 	// Initialize simulator service
 	s.simSvc = service.NewSimulatorService(s.logger, s.eventLog)
 
-	healthHandler := handler.NewHealthHandler()
-	financeHandler := handler.NewFinanceHandler(financeSvc, s.simSvc)
-
-	s.router.HandleFunc("GET /health", healthHandler.Health)
+	financeHandler := handler.NewFinanceHandler(s.simSvc, s.logger)
 
 	// Main finance endpoint - returns full simulation breakdown
-	s.router.HandleFunc("GET /finance", financeHandler.GetStatus)
-	s.router.HandleFunc("GET /finance/history", financeHandler.GetHistory)
+	s.register("GET", "/finance", financeHandler.GetStatus)
+	s.registerPattern("GET", "/finance/history/{page}", financeHandler.GetHistory)
+}
 
-	s.router.HandleFunc("GET /finance/positions", financeHandler.GetPositions)
-	s.router.HandleFunc("GET /finance/predictions", financeHandler.GetPredictions)
-	s.router.HandleFunc("POST /finance/trade", financeHandler.ExecuteTrade)
+func (s *Server) register(method, path string, h http.HandlerFunc) {
+	key := routeKey(method, path)
+	s.allowedRoutes[key] = struct{}{}
+	s.router.HandleFunc(method+" "+path, h)
+}
+
+func (s *Server) registerPattern(method, pattern string, h http.HandlerFunc) {
+	s.router.HandleFunc(method+" "+pattern, h)
+}
+
+func (s *Server) handler() http.Handler {
+	var h http.Handler = s.router
+	h = strictAllowlist(s.allowedRoutes, h)
+	h = securityHeaders(h)
+	return h
 }
 
 func (s *Server) Run(ctx context.Context) error {
@@ -64,7 +72,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	srv := &http.Server{
 		Addr:         ":" + s.cfg.Port,
-		Handler:      s.router,
+		Handler:      s.handler(),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

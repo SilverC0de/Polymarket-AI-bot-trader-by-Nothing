@@ -13,8 +13,8 @@ const (
 	SkipNone              SkipReason = ""
 	SkipPriceDiffTooSmall SkipReason = "price_diff_too_small"    // < MinPriceDiff from target
 	SkipPriceDiffTooLarge SkipReason = "price_diff_too_large"    // > MaxPriceDiff from target
-	SkipTimingTooEarly    SkipReason = "timing_too_early"        // > 3 min before end
-	SkipTimingTooLate     SkipReason = "timing_too_late"         // < 1 min before end
+	SkipTimingTooEarly    SkipReason = "timing_too_early"        // still outside entry window (too long to end)
+	SkipTimingTooLate     SkipReason = "timing_too_late"         // past MinTimeToEnd before end
 	SkipSidewaysMarket    SkipReason = "sideways_market"         // crossed target both ways
 	SkipTrendUnclear      SkipReason = "trend_unclear"           // no clear direction
 	SkipSwingDetected     SkipReason = "swing_detected"          // price reversed direction
@@ -105,7 +105,7 @@ func (s *Strategy) EvaluateEntry(state *MarketState, currentPrice float64, now t
 	// Calculate time to end
 	timeToEnd := state.EndTime.Sub(now)
 
-	// Check timing window (1-3 minutes before end)
+	// Check timing window (MinTimeToEnd–MaxTimeToEnd before end)
 	if timeToEnd > s.config.MaxTimeToEnd {
 		return DirectionNone, SkipTimingTooEarly, fmt.Sprintf("%.0fs to end, need < %.0fs", timeToEnd.Seconds(), s.config.MaxTimeToEnd.Seconds())
 	}
