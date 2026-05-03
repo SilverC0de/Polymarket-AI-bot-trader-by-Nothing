@@ -10,10 +10,10 @@ primary_region = 'jnb'
 
 [env]
   LIVE_TRADING = 'false'
-  PORT = '8080'
+  PORT = '8088'
 
 [http_service]
-  internal_port = 8080
+  internal_port = 8088
   force_https = true
   auto_stop_machines = "off"
   auto_start_machines = false
