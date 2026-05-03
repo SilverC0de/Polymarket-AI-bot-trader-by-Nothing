@@ -9,7 +9,6 @@ primary_region = 'jnb'
 [build]
 
 [env]
-  LIVE_TRADING = 'false'
   PORT = '8088'
 
 [http_service]
