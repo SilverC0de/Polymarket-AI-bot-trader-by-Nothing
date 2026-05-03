@@ -54,6 +54,7 @@ type LogEntry struct {
 
 // SimulatorStatus is the response for /finance endpoint.
 type SimulatorStatus struct {
+	ServerTime   time.Time                  `json:"server_time"`
 	Running      bool                       `json:"running"`
 	Uptime       string                     `json:"uptime"`
 	CurrentPrice float64                    `json:"current_btc_price"`
@@ -439,6 +440,7 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 	target, timeToEnd, hasTarget := s.engine.GetClosestMarketTarget()
 
 	status := SimulatorStatus{
+		ServerTime:       time.Now(),
 		Running:          running,
 		Uptime:           time.Since(startTime).Round(time.Second).String(),
 		CurrentPrice:     currentPrice,
