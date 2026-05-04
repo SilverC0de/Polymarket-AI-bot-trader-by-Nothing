@@ -20,28 +20,28 @@ const (
 
 // TradeDebugContext contains diagnostic info for analyzing losing trades.
 type TradeDebugContext struct {
-	PriceHistory   []PriceSnapshot `json:"price_history"`    // Price samples from entry to resolution
-	EntryMomentum  float64         `json:"entry_momentum"`   // Momentum at entry ($/sec)
-	EntryRecentMove float64        `json:"entry_recent_move"` // How much price moved before entry ($)
+	PriceHistory    []PriceSnapshot `json:"price_history"`     // Price samples from entry to resolution
+	EntryMomentum   float64         `json:"entry_momentum"`    // Momentum at entry ($/sec)
+	EntryRecentMove float64         `json:"entry_recent_move"` // How much price moved before entry ($)
 }
 
 // SimulatedTrade represents a simulated trade entry.
 type SimulatedTrade struct {
-	ID             int
-	MarketID       string
-	EntryTime      time.Time
-	MarketEndTime  time.Time
-	Direction      Direction // UP or DOWN
-	PriceToBeat    float64   // BTC price at market start
-	EntryBTCPrice  float64   // BTC price when trade was entered
-	EntryReason    string
-	TradeSize      float64      // USD amount ($10)
-	EntryPrice     float64      // Price paid for the outcome token (e.g., 0.55)
-	RealOrderBook  bool         // True if EntryPrice came from real order book, false if simulated
-	Outcome        TradeOutcome // WIN, LOSE, or PENDING
-	FinalBTCPrice  float64      // BTC price at market end
-	PnL            float64      // Profit/Loss in USD
-	DebugContext   *TradeDebugContext `json:"debug_context,omitempty"` // Only populated for losing trades
+	ID            int
+	MarketID      string
+	EntryTime     time.Time
+	MarketEndTime time.Time
+	Direction     Direction // UP or DOWN
+	PriceToBeat   float64   // BTC price at market start
+	EntryBTCPrice float64   // BTC price when trade was entered
+	EntryReason   string
+	TradeSize     float64            // USD amount ($10)
+	EntryPrice    float64            // Price paid for the outcome token (e.g., 0.55)
+	RealOrderBook bool               // True if EntryPrice came from real order book, false if simulated
+	Outcome       TradeOutcome       // WIN, LOSE, or PENDING
+	FinalBTCPrice float64            // BTC price at market end
+	PnL           float64            // Profit/Loss in USD
+	DebugContext  *TradeDebugContext `json:"debug_context,omitempty"` // Only populated for losing trades
 }
 
 // SkippedMarket records a market that was skipped with reason.
@@ -71,15 +71,15 @@ type SimulationStats struct {
 
 // MarketOutcome records the result of a 5-minute market.
 type MarketOutcome struct {
-	MarketID      string
-	EndTime       time.Time
-	PriceToBeat   float64
-	FinalPrice    float64
-	Result        Direction // UP or DOWN
-	PriceDiff     float64
-	WeTradedIt    bool
-	OurDirection  Direction
-	OurPnL        float64
+	MarketID     string
+	EndTime      time.Time
+	PriceToBeat  float64
+	FinalPrice   float64
+	Result       Direction // UP or DOWN
+	PriceDiff    float64
+	WeTradedIt   bool
+	OurDirection Direction
+	OurPnL       float64
 }
 
 // LiveTradeFunc is called immediately when the strategy fires a signal, before
@@ -262,11 +262,6 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 		}
 
 		if direction != DirectionNone {
-			// Enter trade
-			e.tradeCounter++
-			state.EnteredTrade = true
-			state.TradeDirection = direction
-
 			// Try to get real entry price from order book
 			var entryPrice float64
 			var realOrderBook bool
@@ -280,6 +275,24 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 				realOrderBook = false
 			}
 			cancel()
+
+			if entryPrice > e.strategy.config.MaxEntryPrice {
+				e.recordSkip(state, timestamp, SkipNoLiquidity,
+					fmt.Sprintf("entry price %.4f above max %.4f", entryPrice, e.strategy.config.MaxEntryPrice),
+					btcPrice)
+				continue
+			}
+			if profit := potentialProfit(e.strategy.config.TradeSize, entryPrice); profit < e.strategy.config.MinProfitUSD {
+				e.recordSkip(state, timestamp, SkipNoLiquidity,
+					fmt.Sprintf("win profit $%.2f below minimum $%.2f at entry price %.4f", profit, e.strategy.config.MinProfitUSD, entryPrice),
+					btcPrice)
+				continue
+			}
+
+			// Enter trade
+			e.tradeCounter++
+			state.EnteredTrade = true
+			state.TradeDirection = direction
 
 			// Capture debug metrics at entry
 			entryMomentum := e.strategy.calculateMomentum(state.PriceHistory, state.PriceToBeat)
@@ -325,6 +338,32 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 			}
 		}
 	}
+}
+
+func (e *Engine) recordSkip(state *MarketState, timestamp time.Time, reason SkipReason, details string, btcPrice float64) {
+	state.SkipReason = reason
+	skip := SkippedMarket{
+		MarketID:     state.MarketID,
+		Timestamp:    timestamp,
+		Reason:       reason,
+		Details:      details,
+		BTCPrice:     btcPrice,
+		PriceToBeat:  state.PriceToBeat,
+		TimeToEnd:    state.EndTime.Sub(timestamp),
+		PriceHistory: state.PriceHistory,
+	}
+	e.skippedMarkets = append(e.skippedMarkets, skip)
+	if e.onSkip != nil {
+		go e.onSkip(skip)
+	}
+}
+
+func potentialProfit(amountUSD, entryPrice float64) float64 {
+	if amountUSD <= 0 || entryPrice <= 0 {
+		return 0
+	}
+	shares := amountUSD / entryPrice
+	return (1 - entryPrice) * shares
 }
 
 // calculateEntryPrice simulates the entry price when the order book is unavailable.

@@ -11,17 +11,17 @@ type SkipReason string
 
 const (
 	SkipNone              SkipReason = ""
-	SkipPriceDiffTooSmall SkipReason = "price_diff_too_small"    // < MinPriceDiff from target
-	SkipPriceDiffTooLarge SkipReason = "price_diff_too_large"    // > MaxPriceDiff from target
-	SkipTimingTooEarly    SkipReason = "timing_too_early"        // still outside entry window (too long to end)
-	SkipTimingTooLate     SkipReason = "timing_too_late"         // past MinTimeToEnd before end
-	SkipSidewaysMarket    SkipReason = "sideways_market"         // crossed target both ways
-	SkipTrendUnclear      SkipReason = "trend_unclear"           // no clear direction
-	SkipSwingDetected     SkipReason = "swing_detected"          // price reversed direction
-	SkipNoLiquidity       SkipReason = "no_liquidity"            // can't get good price
-	SkipAlreadyResolved   SkipReason = "already_resolved"        // market ended
-	SkipWeakMomentum      SkipReason = "weak_momentum"           // price not moving away from target fast enough
-	SkipOverextended      SkipReason = "overextended"            // price moved too fast, likely to reverse
+	SkipPriceDiffTooSmall SkipReason = "price_diff_too_small" // < MinPriceDiff from target
+	SkipPriceDiffTooLarge SkipReason = "price_diff_too_large" // > MaxPriceDiff from target
+	SkipTimingTooEarly    SkipReason = "timing_too_early"     // still outside entry window (too long to end)
+	SkipTimingTooLate     SkipReason = "timing_too_late"      // past MinTimeToEnd before end
+	SkipSidewaysMarket    SkipReason = "sideways_market"      // crossed target both ways
+	SkipTrendUnclear      SkipReason = "trend_unclear"        // no clear direction
+	SkipSwingDetected     SkipReason = "swing_detected"       // price reversed direction
+	SkipNoLiquidity       SkipReason = "no_liquidity"         // can't get good price
+	SkipAlreadyResolved   SkipReason = "already_resolved"     // market ended
+	SkipWeakMomentum      SkipReason = "weak_momentum"        // price not moving away from target fast enough
+	SkipOverextended      SkipReason = "overextended"         // price moved too fast, likely to reverse
 )
 
 // Direction represents the predicted market direction.
@@ -42,17 +42,17 @@ type PriceSnapshot struct {
 // MarketState tracks the state of a market being watched.
 type MarketState struct {
 	MarketID       string
-	PriceToBeat    float64       // BTC price at market start
+	PriceToBeat    float64 // BTC price at market start
 	StartTime      time.Time
 	EndTime        time.Time
 	PriceHistory   []PriceSnapshot
-	CrossedAbove   bool          // price went above target
-	CrossedBelow   bool          // price went below target
+	CrossedAbove   bool // price went above target
+	CrossedBelow   bool // price went below target
 	EnteredTrade   bool
 	TradeDirection Direction
 	SkipReason     SkipReason
-	UpTokenID      string        // Token ID for "Up" outcome (YES)
-	DownTokenID    string        // Token ID for "Down" outcome (NO)
+	UpTokenID      string // Token ID for "Up" outcome (YES)
+	DownTokenID    string // Token ID for "Down" outcome (NO)
 }
 
 // StrategyConfig holds the trading strategy parameters.
@@ -67,6 +67,9 @@ type StrategyConfig struct {
 	MinMomentum         float64       // Minimum $/sec momentum away from target
 	MaxRecentMove       float64       // Max price move in lookback period before considered overextended
 	RecentMoveLookback  time.Duration // How far back to check for rapid moves
+	MaxPullbackToTarget float64       // Max retracement back toward target after a favorable move
+	MaxEntryPrice       float64       // Max average fill price for the full trade size
+	MinProfitUSD        float64       // Minimum profit if the trade wins
 }
 
 // DefaultStrategyConfig returns the default configuration based on user requirements.
@@ -75,13 +78,16 @@ func DefaultStrategyConfig() StrategyConfig {
 		MinPriceDiff:        40.0,
 		MaxPriceDiff:        120.0,
 		MinTimeToEnd:        20 * time.Second,
-		MaxTimeToEnd:        2 * time.Minute,
+		MaxTimeToEnd:        100 * time.Second,
 		TradeSize:           20.0,
 		TrendSampleCount:    5,
-		MomentumSamples:     3,    // Check last 3 samples
-		MinMomentum:         0.5,  // Must be moving away at $0.50/sec minimum
-		MaxRecentMove:       12.0, // Skip if price moved >$12 in lookback period
+		MomentumSamples:     3,                // Check last 3 samples
+		MinMomentum:         0.5,              // Must be moving away at $0.50/sec minimum
+		MaxRecentMove:       12.0,             // Skip if price moved >$12 in lookback period
 		RecentMoveLookback:  60 * time.Second, // Check last 60 seconds
+		MaxPullbackToTarget: 15.0,             // Skip if price has retraced >$15 back toward target
+		MaxEntryPrice:       0.85,
+		MinProfitUSD:        3.0,
 	}
 }
 
@@ -169,6 +175,10 @@ func (s *Strategy) EvaluateEntry(state *MarketState, currentPrice float64, now t
 	recentMove := s.calculateRecentMove(state.PriceHistory, trend)
 	if recentMove > s.config.MaxRecentMove {
 		return DirectionNone, SkipOverextended, fmt.Sprintf("recent move $%.2f, max $%.2f", recentMove, s.config.MaxRecentMove)
+	}
+	pullback := s.calculatePullbackTowardTarget(state.PriceHistory, state.PriceToBeat, trend)
+	if pullback > s.config.MaxPullbackToTarget {
+		return DirectionNone, SkipSwingDetected, fmt.Sprintf("pullback toward target $%.2f, max $%.2f", pullback, s.config.MaxPullbackToTarget)
 	}
 
 	// All checks passed - enter trade following the trend
@@ -269,6 +279,51 @@ func (s *Strategy) calculateRecentMove(history []PriceSnapshot, direction Direct
 		return 0
 	}
 	return 0
+}
+
+// calculatePullbackTowardTarget returns the retracement from the most favorable
+// distance in the lookback window back toward the target.
+func (s *Strategy) calculatePullbackTowardTarget(history []PriceSnapshot, priceToBeat float64, direction Direction) float64 {
+	if len(history) < 2 {
+		return 0
+	}
+
+	now := history[len(history)-1].Timestamp
+	cutoff := now.Add(-s.config.RecentMoveLookback)
+	current := history[len(history)-1].BTCPrice
+
+	switch direction {
+	case DirectionUp:
+		maxPrice := current
+		for _, snap := range history {
+			if snap.Timestamp.Before(cutoff) {
+				continue
+			}
+			if snap.BTCPrice > maxPrice {
+				maxPrice = snap.BTCPrice
+			}
+		}
+		if current <= priceToBeat {
+			return maxPrice - priceToBeat
+		}
+		return maxPrice - current
+	case DirectionDown:
+		minPrice := current
+		for _, snap := range history {
+			if snap.Timestamp.Before(cutoff) {
+				continue
+			}
+			if snap.BTCPrice < minPrice {
+				minPrice = snap.BTCPrice
+			}
+		}
+		if current >= priceToBeat {
+			return priceToBeat - minPrice
+		}
+		return current - minPrice
+	default:
+		return 0
+	}
 }
 
 // calculateMomentum returns the rate of price movement away from target ($/sec).
