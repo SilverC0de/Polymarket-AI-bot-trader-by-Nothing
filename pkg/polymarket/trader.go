@@ -464,11 +464,17 @@ func concat(slices ...[]byte) []byte {
 	return out
 }
 
-// randomSalt generates a cryptographically random 256-bit salt.
+// randomSalt generates a random salt that fits inside JavaScript's
+// Number.MAX_SAFE_INTEGER (2^53 - 1). The CLOB API parses salt as a JSON
+// number; anything larger silently loses precision server-side and the
+// reconstructed EIP-712 digest no longer matches our signature.
+// Matches py-clob-client / clob-client which use round(random() * 1e9).
 func randomSalt() *big.Int {
-	b := make([]byte, 32)
-	if _, err := cryptorand.Read(b); err != nil {
-		return new(big.Int).SetInt64(time.Now().UnixNano())
+	const maxSafe = 1 << 53 // 2^53; well below the 2^53-1 ceiling
+	max := new(big.Int).SetUint64(maxSafe)
+	n, err := cryptorand.Int(cryptorand.Reader, max)
+	if err != nil {
+		return new(big.Int).SetInt64(time.Now().UnixNano() & (maxSafe - 1))
 	}
-	return new(big.Int).SetBytes(b)
+	return n
 }
