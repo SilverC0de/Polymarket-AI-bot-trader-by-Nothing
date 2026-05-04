@@ -537,6 +537,41 @@ func (s *SimulatorService) PersistedPaged(ctx context.Context, offset, limit int
 	return s.eventLog.ListRange(ctx, offset, limit)
 }
 
+// PersistedHistoryPaged returns one page of persisted events (newest first).
+// If learn is false, only trade events with outcome WIN or LOSE are included; skips, outcomes, and pending trades are omitted.
+// If learn is true, behavior matches PersistedPaged (all event kinds).
+func (s *SimulatorService) PersistedHistoryPaged(ctx context.Context, offset, limit int64, learn bool) ([]store.PersistedEvent, int64, error) {
+	if s.eventLog == nil {
+		return nil, 0, nil
+	}
+	if learn {
+		total, err := s.eventLog.Len(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+		evs, err := s.eventLog.ListRange(ctx, offset, limit)
+		return evs, total, err
+	}
+	n, err := s.eventLog.Len(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	all, err := s.eventLog.ListRange(ctx, 0, n)
+	if err != nil {
+		return nil, 0, err
+	}
+	filtered := store.FilterPersistedForHistory(all, false)
+	total := int64(len(filtered))
+	if offset >= total {
+		return []store.PersistedEvent{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return filtered[offset:end], total, nil
+}
+
 // PersistedLen returns total persisted events held in memory for this process.
 func (s *SimulatorService) PersistedLen(ctx context.Context) (int64, error) {
 	if s.eventLog == nil {

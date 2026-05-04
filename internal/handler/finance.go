@@ -40,6 +40,7 @@ type FinanceHistoryResponse struct {
 }
 
 // GetHistory returns one page of persisted simulation events (newest first; page 1 = newest).
+// By default only resolved trades (WIN or LOSE) are returned. Query learn=true includes skips, outcomes, and pending trades.
 func (h *FinanceHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	if h.simSvc == nil {
 		h.log.Warn("GET /finance/history", "status", http.StatusServiceUnavailable, "reason", "simulator not initialized")
@@ -54,17 +55,12 @@ func (h *FinanceHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	pageSize := service.HistoryPageSize
 	offset := (int64(page) - 1) * pageSize
+	learn := parseLearnQuery(r.URL.Query().Get("learn"))
 
 	ctx := r.Context()
-	total, err := h.simSvc.PersistedLen(ctx)
+	events, total, err := h.simSvc.PersistedHistoryPaged(ctx, offset, pageSize, learn)
 	if err != nil {
-		h.log.Error("GET /finance/history", "step", "persisted_len", "err", err)
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	events, err := h.simSvc.PersistedPaged(ctx, offset, pageSize)
-	if err != nil {
-		h.log.Error("GET /finance/history", "step", "persisted_paged", "err", err, "page", page, "offset", offset)
+		h.log.Error("GET /finance/history", "step", "persisted_history_paged", "err", err, "page", page, "offset", offset)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -77,6 +73,7 @@ func (h *FinanceHandler) GetHistory(w http.ResponseWriter, r *http.Request) {
 		"remote", r.RemoteAddr,
 		"page", page,
 		"page_size", pageSize,
+		"learn", learn,
 		"total", total,
 		"returned", len(events),
 	)
@@ -101,4 +98,9 @@ func parseHistoryLimit(raw string) int {
 		return service.MaxFinanceHistoryLimit
 	}
 	return n
+}
+
+func parseLearnQuery(raw string) bool {
+	v, err := strconv.ParseBool(raw)
+	return err == nil && v
 }

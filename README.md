@@ -171,9 +171,9 @@ REDIS_URL=redis://localhost:6379
 Polymarket blocks or limits access from many countries and some subregions for compliance reasons. Your bot’s **egress IP** (where the host runs) may be treated like a user location, so pick a provider region that is allowed before you enable live trading.
 
 - **Official list and rules:** [Geographic restrictions](https://help.polymarket.com/en/articles/13364163-geographic-restrictions) — includes fully blocked countries (e.g. US, GB, DE, FR), close-only markets, and blocked subregions (e.g. Ontario). Polymarket also states that using VPNs or similar to bypass restrictions violates their Terms of Service.
-- **Infrastructure hint from that page:** Polymarket lists **primary servers** in `eu-west-2` and the **closest non-georestricted region** as `eu-west-1`. Deploying in an **allowed** EU-adjacent region (for example Fly.io `ams`, `mad`, or `dub` — not `lhr`, `fra`, or `cdg`, since GB/FR/DE are restricted — always cross-check the current list) often aligns with that guidance and can reduce latency to their stack.
+- **Infrastructure hint from that page:** Polymarket lists **primary servers** in `eu-west-2` and the **closest non-georestricted region** as `eu-west-1`. Deploying in an **allowed** EU-adjacent [Fly.io region](https://fly.io/docs/reference/regions/) (e.g. `ams` in the Netherlands, or `arn` in Sweden — not `lhr`, `fra`, or `cdg` if you want to avoid GB/DE/FR egress; always cross-check the current Polymarket list) often aligns with that guidance and can reduce latency to their stack.
 
-This repo’s [`fly.toml`](fly.toml) sets `primary_region = "jnb"` (Johannesburg) as an example; South Africa is not on the blocked-country table in the article above, but restrictions change — confirm against Polymarket’s page before production and set `primary_region` to whatever region your host provides that remains compliant.
+This repo’s [`fly.toml`](fly.toml) sets `primary_region = "ams"` (Amsterdam). After changing region, recreate or migrate Machines if needed (`fly scale count`, `fly machines list`, or Fly’s [machine placement](https://fly.io/docs/machines/guides-examples/machine-placement/) docs). Restrictions change over time — confirm against Polymarket’s page before production.
 
 ---
 
