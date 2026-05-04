@@ -381,16 +381,7 @@ func (t *Trader) signOrder(o *v2Order) (string, error) {
 
 func (t *Trader) l2AuthHeaders(method, path, body string) map[string]string {
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	message := ts + method + path + body
-
-	// The API secret is base64-encoded; decode it before using as the HMAC key.
-	secretBytes, err := base64.StdEncoding.DecodeString(t.config.APISecret)
-	if err != nil {
-		secretBytes, _ = base64.RawStdEncoding.DecodeString(t.config.APISecret)
-	}
-	mac := hmac.New(sha256.New, secretBytes)
-	mac.Write([]byte(message))
-	sig := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	sig := buildL2Signature(t.config.APISecret, ts, method, path, body)
 
 	return map[string]string{
 		"POLY_ADDRESS":    t.eoaAddress.Hex(),
@@ -399,6 +390,32 @@ func (t *Trader) l2AuthHeaders(method, path, body string) map[string]string {
 		"POLY_API_KEY":    t.config.APIKey,
 		"POLY_PASSPHRASE": t.config.APIPassphrase,
 	}
+}
+
+func buildL2Signature(secret, timestamp, method, path, body string) string {
+	message := timestamp + method + path + body
+
+	// Polymarket API secrets and HMAC signatures use URL-safe base64.
+	secretBytes, err := decodeBase64URL(secret)
+	if err != nil {
+		secretBytes = []byte(secret)
+	}
+	mac := hmac.New(sha256.New, secretBytes)
+	mac.Write([]byte(message))
+	return base64.URLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func decodeBase64URL(s string) ([]byte, error) {
+	if decoded, err := base64.URLEncoding.DecodeString(s); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.RawURLEncoding.DecodeString(s); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(s); err == nil {
+		return decoded, nil
+	}
+	return base64.RawStdEncoding.DecodeString(s)
 }
 
 // ── Wire body types ───────────────────────────────────────────────────────────

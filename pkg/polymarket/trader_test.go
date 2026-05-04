@@ -64,3 +64,15 @@ func TestPostOrderBodySerializesSaltAsNumber(t *testing.T) {
 		t.Fatalf("expected explicit deferExec/postOnly flags: %s", got)
 	}
 }
+
+func TestBuildL2SignatureUsesURLSafeBase64(t *testing.T) {
+	got := buildL2Signature("c2VjcmV0", "1700000000", "POST", "/order", `{"x":1}`)
+	want := "Uc3z_vcj4K83dnLn8zBFPPSLPInoPi4jixQmfdQDv8s="
+
+	if got != want {
+		t.Fatalf("signature = %q, want %q", got, want)
+	}
+	if strings.ContainsAny(got, "+/") {
+		t.Fatalf("signature is not URL-safe base64: %q", got)
+	}
+}
