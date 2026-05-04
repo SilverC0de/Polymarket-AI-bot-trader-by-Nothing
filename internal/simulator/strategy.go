@@ -78,12 +78,12 @@ func DefaultStrategyConfig() StrategyConfig {
 		MinPriceDiff:        40.0,
 		MaxPriceDiff:        120.0,
 		MinTimeToEnd:        20 * time.Second,
-		MaxTimeToEnd:        100 * time.Second,
+		MaxTimeToEnd:        2 * time.Minute,
 		TradeSize:           20.0,
 		TrendSampleCount:    5,
 		MomentumSamples:     3,                // Check last 3 samples
 		MinMomentum:         0.5,              // Must be moving away at $0.50/sec minimum
-		MaxRecentMove:       12.0,             // Skip if price moved >$12 in lookback period
+		MaxRecentMove:       18.0,             // Skip if price moved >$18 in lookback period
 		RecentMoveLookback:  60 * time.Second, // Check last 60 seconds
 		MaxPullbackToTarget: 15.0,             // Skip if price has retraced >$15 back toward target
 		MaxEntryPrice:       0.85,

@@ -467,13 +467,61 @@
       return fmtStatus(s);
     }
 
+    function collapseTradeLifecycle(events) {
+      const list = Array.isArray(events) ? events : [];
+      const bestByKey = new Map();
+      list.forEach((e, idx) => {
+        if (e.kind !== "trade") return;
+        const key = tradeLifecycleKey(e);
+        if (!key) return;
+        const current = bestByKey.get(key);
+        const score = tradeOutcomeScore(e);
+        if (!current || score > current.score) {
+          bestByKey.set(key, { idx, score });
+        }
+      });
+      const seen = new Set();
+      return list.filter((e, idx) => {
+        if (e.kind !== "trade") return true;
+        const key = tradeLifecycleKey(e);
+        if (!key) return true;
+        if (seen.has(key)) return false;
+        const best = bestByKey.get(key);
+        if (best && best.idx !== idx) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    function tradeLifecycleKey(e) {
+      const t = safeParse(e.data) || {};
+      const id = t.ID ?? t.id;
+      const marketID = t.MarketID ?? t.market_id;
+      const entryTime = t.EntryTime ?? t.entry_time;
+      const direction = t.Direction ?? t.direction;
+      if (id == null || !marketID || !entryTime) return "";
+      return `${marketID}|${id}|${direction || ""}|${entryTime}`;
+    }
+
+    function tradeOutcomeScore(e) {
+      const t = safeParse(e.data) || {};
+      const out = String(t.Outcome ?? t.outcome ?? "").toUpperCase();
+      if (out === "WIN" || out === "LOSE") return 2;
+      if (out === "PENDING") return 1;
+      return 0;
+    }
+
     function renderHistory(h) {
       historyMeta.total_pages = h.total_pages || 1;
-      $("pageLabel").textContent = `page ${h.page}/${h.total_pages || 1} · rows ${h.events?.length ?? 0}`;
-      if ($("histSummary")) $("histSummary").textContent = buildHistorySummary(h);
+      const rawEvents = h.events || [];
+      const displayEvents = collapseTradeLifecycle(rawEvents);
+      const collapsedCount = rawEvents.length - displayEvents.length;
+      const collapsedText = collapsedCount > 0 ? ` · collapsed ${collapsedCount}` : "";
+      $("pageLabel").textContent = `page ${h.page}/${h.total_pages || 1} · rows ${displayEvents.length}${collapsedText}`;
+      if ($("histSummary")) $("histSummary").textContent = buildHistorySummary({ ...h, events: displayEvents });
       const ul = $("feed");
       ul.innerHTML = "";
-      (h.events || []).forEach((e) => {
+      displayEvents.forEach((e) => {
         const li = document.createElement("li");
         li.className = kindClass(e.kind || "");
         const ts = escapeHtml(String(e.ts || ""));
