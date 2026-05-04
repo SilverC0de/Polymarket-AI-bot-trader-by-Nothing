@@ -41,8 +41,11 @@ const orderTypeString = "Order(uint256 salt,address maker,address signer,uint256
 	"uint256 timestamp,bytes32 metadata,bytes32 builder)"
 
 const (
-	defaultTickSize   = 0.01
-	maxBinaryBuyPrice = 0.99
+	defaultTickSize         = 0.01
+	maxBinaryBuyPrice       = 0.99
+	collateralScale         = 1_000_000
+	marketBuyMakerPrecision = 10_000 // 2 decimals in 6-decimal fixed units
+	marketBuyTakerPrecision = 100    // 4 decimals in 6-decimal fixed units
 )
 
 // TraderConfig holds all credentials needed for live order placement.
@@ -274,15 +277,29 @@ func marketBuyAmounts(amountUSD, entryPrice float64) (int64, int64, error) {
 		return 0, 0, fmt.Errorf("worst price %.4f cannot be represented on tick %.4f", worstPrice, defaultTickSize)
 	}
 
-	budgetMicros := int64(math.Floor(amountUSD * 1_000_000))
-	unitLots := budgetMicros / priceTicks
-	if unitLots <= 0 {
-		return 0, 0, fmt.Errorf("amountUSD %.6f too small for price %.4f", amountUSD, worstPrice)
+	makerAmount := roundDownFixed(amountUSD, collateralScale, marketBuyMakerPrecision)
+	if makerAmount <= 0 {
+		return 0, 0, fmt.Errorf("amountUSD %.6f too small for market buy precision", amountUSD)
 	}
 
-	makerAmount := unitLots * priceTicks
-	takerAmount := unitLots * tickUnits
+	// Market buys are validated separately by the CLOB: maker collateral can
+	// only use cents, while taker outcome shares can use 4 decimals.
+	rawTakerAmount := float64(makerAmount) * float64(tickUnits) / float64(priceTicks)
+	takerAmount := roundDownInt(rawTakerAmount, marketBuyTakerPrecision)
+	if takerAmount <= 0 {
+		return 0, 0, fmt.Errorf("amountUSD %.6f too small for price %.4f", amountUSD, worstPrice)
+	}
 	return makerAmount, takerAmount, nil
+}
+
+func roundDownFixed(amount float64, scale, precision int64) int64 {
+	units := int64(math.Floor(amount*float64(scale) + 1e-9))
+	return roundDownInt(float64(units), precision)
+}
+
+func roundDownInt(amount float64, precision int64) int64 {
+	units := int64(math.Floor(amount + 1e-9))
+	return units - units%precision
 }
 
 // GetOrderStatus fetches the current status of an order from CLOB V2.
