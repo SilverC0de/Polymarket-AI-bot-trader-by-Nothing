@@ -22,6 +22,7 @@ const (
 	SkipAlreadyResolved   SkipReason = "already_resolved"     // market ended
 	SkipWeakMomentum      SkipReason = "weak_momentum"        // price not moving away from target fast enough
 	SkipOverextended      SkipReason = "overextended"         // price moved too fast, likely to reverse
+	SkipDangerousPattern  SkipReason = "dangerous_pattern"    // combination of small cushion, bad position, and pullback
 )
 
 // Direction represents the predicted market direction.
@@ -57,37 +58,42 @@ type MarketState struct {
 
 // StrategyConfig holds the trading strategy parameters.
 type StrategyConfig struct {
-	MinPriceDiff        float64       // Minimum price difference from target ($40)
-	MaxPriceDiff        float64       // Maximum price difference from target ($120)
-	MinTimeToEnd        time.Duration // Minimum time before market ends (1 min)
-	MaxTimeToEnd        time.Duration // Maximum time before market ends (3 min)
-	TradeSize           float64       // Trade size in USD ($10)
-	TrendSampleCount    int           // Number of samples to determine trend
-	MomentumSamples     int           // Number of recent samples for momentum check
-	MinMomentum         float64       // Minimum $/sec momentum away from target
-	MaxRecentMove       float64       // Max price move in lookback period before considered overextended
-	RecentMoveLookback  time.Duration // How far back to check for rapid moves
-	MaxPullbackToTarget float64       // Max retracement back toward target after a favorable move
-	MaxEntryPrice       float64       // Max average fill price for the full trade size
-	MinProfitUSD        float64       // Minimum profit if the trade wins
+	MinPriceDiff       float64       // Minimum price difference from target ($40)
+	MaxPriceDiff       float64       // Maximum price difference from target ($120)
+	MinTimeToEnd       time.Duration // Minimum time before market ends (1 min)
+	MaxTimeToEnd       time.Duration // Maximum time before market ends (3 min)
+	TradeSize          float64       // Trade size in USD ($10)
+	TrendSampleCount   int           // Number of samples to determine trend
+	MomentumSamples    int           // Number of recent samples for momentum check
+	MinMomentum        float64       // Minimum $/sec momentum away from target
+	MaxRecentMove      float64       // Max price move in lookback period before considered overextended
+	RecentMoveLookback time.Duration // How far back to check for rapid moves
+	MaxEntryPrice      float64       // Max average fill price for order book check
+	MinProfitUSD       float64       // Minimum profit for order book check
+	// Dangerous pattern filter (all 3 must be true to reject)
+	DangerCushionLimit    float64 // Max cushion to be considered "small" ($60)
+	DangerPositionLimit   float64 // Min position in range to avoid being "bad" (0.35 = 35%)
+	DangerPullbackPercent float64 // Max pullback as % of cushion (45%)
 }
 
 // DefaultStrategyConfig returns the default configuration based on user requirements.
 func DefaultStrategyConfig() StrategyConfig {
 	return StrategyConfig{
-		MinPriceDiff:        40.0,
-		MaxPriceDiff:        120.0,
-		MinTimeToEnd:        20 * time.Second,
-		MaxTimeToEnd:        2 * time.Minute,
-		TradeSize:           20.0,
-		TrendSampleCount:    5,
-		MomentumSamples:     3,                // Check last 3 samples
-		MinMomentum:         0.5,              // Must be moving away at $0.50/sec minimum
-		MaxRecentMove:       18.0,             // Skip if price moved >$18 in lookback period
-		RecentMoveLookback:  60 * time.Second, // Check last 60 seconds
-		MaxPullbackToTarget: 15.0,             // Skip if price has retraced >$15 back toward target
-		MaxEntryPrice:       0.85,
-		MinProfitUSD:        3.0,
+		MinPriceDiff:       40.0,
+		MaxPriceDiff:       120.0,
+		MinTimeToEnd:       20 * time.Second,
+		MaxTimeToEnd:       2 * time.Minute,
+		TradeSize:          20.0,
+		TrendSampleCount:   5,
+		MomentumSamples:    3,                // Check last 3 samples
+		MinMomentum:        0.5,              // Must be moving away at $0.50/sec minimum
+		MaxRecentMove:         12.0,             // Skip if price moved >$12 in lookback period
+		RecentMoveLookback:    60 * time.Second, // Check last 60 seconds
+		MaxEntryPrice:         0.99,             // Order book check - very lenient
+		MinProfitUSD:          0.10,             // Order book check - very lenient
+		DangerCushionLimit:    60.0,             // Cushion must be < $60 to be risky
+		DangerPositionLimit:   0.35,             // Position must be < 35% to be risky
+		DangerPullbackPercent: 45.0,             // Pullback must be > 45% of cushion to be risky
 	}
 }
 
@@ -176,9 +182,10 @@ func (s *Strategy) EvaluateEntry(state *MarketState, currentPrice float64, now t
 	if recentMove > s.config.MaxRecentMove {
 		return DirectionNone, SkipOverextended, fmt.Sprintf("recent move $%.2f, max $%.2f", recentMove, s.config.MaxRecentMove)
 	}
-	pullback := s.calculatePullbackTowardTarget(state.PriceHistory, state.PriceToBeat, trend)
-	if pullback > s.config.MaxPullbackToTarget {
-		return DirectionNone, SkipSwingDetected, fmt.Sprintf("pullback toward target $%.2f, max $%.2f", pullback, s.config.MaxPullbackToTarget)
+
+	// Check for dangerous entry pattern - only reject if ALL three conditions are met
+	if hasDangerousPattern := s.checkDangerousPattern(state.PriceHistory, currentPrice, state.PriceToBeat, absDiff, trend); hasDangerousPattern {
+		return DirectionNone, SkipDangerousPattern, "small cushion + bad entry position + significant pullback"
 	}
 
 	// All checks passed - enter trade following the trend
@@ -281,51 +288,6 @@ func (s *Strategy) calculateRecentMove(history []PriceSnapshot, direction Direct
 	return 0
 }
 
-// calculatePullbackTowardTarget returns the retracement from the most favorable
-// distance in the lookback window back toward the target.
-func (s *Strategy) calculatePullbackTowardTarget(history []PriceSnapshot, priceToBeat float64, direction Direction) float64 {
-	if len(history) < 2 {
-		return 0
-	}
-
-	now := history[len(history)-1].Timestamp
-	cutoff := now.Add(-s.config.RecentMoveLookback)
-	current := history[len(history)-1].BTCPrice
-
-	switch direction {
-	case DirectionUp:
-		maxPrice := current
-		for _, snap := range history {
-			if snap.Timestamp.Before(cutoff) {
-				continue
-			}
-			if snap.BTCPrice > maxPrice {
-				maxPrice = snap.BTCPrice
-			}
-		}
-		if current <= priceToBeat {
-			return maxPrice - priceToBeat
-		}
-		return maxPrice - current
-	case DirectionDown:
-		minPrice := current
-		for _, snap := range history {
-			if snap.Timestamp.Before(cutoff) {
-				continue
-			}
-			if snap.BTCPrice < minPrice {
-				minPrice = snap.BTCPrice
-			}
-		}
-		if current >= priceToBeat {
-			return priceToBeat - minPrice
-		}
-		return current - minPrice
-	default:
-		return 0
-	}
-}
-
 // calculateMomentum returns the rate of price movement away from target ($/sec).
 // Positive = moving away from target, Negative = moving toward target.
 func (s *Strategy) calculateMomentum(history []PriceSnapshot, priceToBeat float64) float64 {
@@ -350,6 +312,69 @@ func (s *Strategy) calculateMomentum(history []PriceSnapshot, priceToBeat float6
 	// Positive momentum = moving away from target
 	// Negative momentum = moving toward target
 	return (endDist - startDist) / timeDiff
+}
+
+// checkDangerousPattern checks for the specific dangerous entry pattern.
+// Returns true only if ALL three conditions are met:
+// 1. Small-medium cushion (< DangerCushionLimit)
+// 2. Poor entry position (< DangerPositionLimit of 60s range)
+// 3. Significant pullback (> DangerPullbackPercent of cushion)
+func (s *Strategy) checkDangerousPattern(history []PriceSnapshot, currentPrice, priceToBeat, cushion float64, direction Direction) bool {
+	if len(history) < 10 {
+		return false // Not enough data to evaluate
+	}
+
+	// Check condition 1: Small cushion
+	if cushion >= s.config.DangerCushionLimit {
+		return false // Large cushion, not dangerous
+	}
+
+	// Calculate 60s price range
+	prices := make([]float64, len(history))
+	for i, snap := range history {
+		prices[i] = snap.BTCPrice
+	}
+	minPrice := prices[0]
+	maxPrice := prices[0]
+	for _, p := range prices {
+		if p < minPrice {
+			minPrice = p
+		}
+		if p > maxPrice {
+			maxPrice = p
+		}
+	}
+
+	priceRange := maxPrice - minPrice
+	if priceRange == 0 {
+		return false // No range to evaluate
+	}
+
+	// Calculate entry position in range
+	var positionInRange float64
+	var pullbackFromExtreme float64
+
+	if direction == DirectionUp {
+		positionInRange = (currentPrice - minPrice) / priceRange
+		pullbackFromExtreme = maxPrice - currentPrice
+	} else { // DirectionDown
+		positionInRange = (maxPrice - currentPrice) / priceRange
+		pullbackFromExtreme = currentPrice - minPrice
+	}
+
+	// Check condition 2: Bad entry position
+	if positionInRange >= s.config.DangerPositionLimit {
+		return false // Good position, not dangerous
+	}
+
+	// Check condition 3: Significant pullback
+	pullbackPercent := (pullbackFromExtreme / cushion) * 100
+	if pullbackPercent <= s.config.DangerPullbackPercent {
+		return false // Acceptable pullback, not dangerous
+	}
+
+	// All three conditions met - this is a dangerous pattern
+	return true
 }
 
 // HasSwung checks if the market has swung (reversed direction after establishing a trend).
