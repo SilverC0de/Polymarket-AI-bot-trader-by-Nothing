@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pmvibes // finance.node</title>
+  <style>
+    :root {
+      --bg: #050608;
+      --panel: #0c0f14;
+      --border: #1e2633;
+      --text: #b8ffc8;
+      --dim: #5a7a66;
+      --accent: #00ff9d;
+      --warn: #ffd447;
+      --err: #ff5c5c;
+      --cyan: #5ce1ff;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.45;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    ::selection { background: rgba(92, 225, 255, 0.25); }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 255, 157, 0.015) 2px,
+        rgba(0, 255, 157, 0.015) 4px
+      );
+      z-index: 9999;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 1.25rem 1rem 2rem;
+    }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    h1 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      text-shadow: 0 0 12px rgba(0, 255, 157, 0.22);
+    }
+    .sub {
+      margin-top: 0.35rem;
+      font-size: 11px;
+      color: var(--dim);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      align-items: center;
+    }
+    .sub kbd {
+      padding: 0.1rem 0.35rem;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--cyan);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem;
+    }
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .panel {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      padding: 0.65rem 0.75rem;
+      box-shadow:
+        0 0 0 1px rgba(0, 255, 157, 0.05) inset,
+        0 18px 40px rgba(0, 0, 0, 0.35);
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.55rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 1px dashed var(--border);
+      font-size: 11px;
+      color: var(--cyan);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    pre.blk {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--text);
+      font-size: 11px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 9rem 1fr;
+      gap: 0.35rem;
+      margin: 0.15rem 0;
+    }
+    .row .lab { color: var(--dim); }
+    .row .val { color: var(--accent); }
+    .row .val.warn { color: var(--warn); }
+    .row .val.bad { color: var(--err); }
+    .bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-top: 0.65rem;
+      font-size: 11px;
+    }
+    button, label {
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+    button {
+      cursor: pointer;
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 0.2rem 0.55rem;
+    }
+    button:hover { background: rgba(0, 255, 157, 0.08); }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    input[type="checkbox"] {
+      accent-color: var(--accent);
+    }
+    #statusLine {
+      margin-top: 0.75rem;
+      font-size: 11px;
+      color: var(--dim);
+    }
+    #statusLine .ok { color: var(--accent); }
+    #statusLine .bad { color: var(--err); }
+    #feed {
+      max-height: 420px;
+      overflow-y: auto;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      font-size: 11px;
+    }
+    #feed li {
+      border-left: 2px solid var(--border);
+      padding: 0.35rem 0 0.35rem 0.55rem;
+      margin-bottom: 0.35rem;
+    }
+    #feed li.k-trade { border-left-color: var(--cyan); }
+    #feed li.k-skip { border-left-color: var(--warn); }
+    #feed li.k-outcome { border-left-color: #a78bfa; }
+    #feed .ts { color: var(--dim); }
+    #feed .kind {
+      font-weight: 600;
+      margin-left: 0.35rem;
+    }
+    #feed pre {
+      margin: 0.25rem 0 0;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+      opacity: 0.92;
+    }
+    .pager {
+      display: inline-flex;
+      gap: 0.35rem;
+      align-items: center;
+      margin-left: auto;
+    }
+    #toast {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      max-width: min(440px, 92vw);
+      padding: 0.5rem 0.65rem;
+      border: 1px solid var(--err);
+      background: rgba(20, 8, 8, 0.95);
+      color: var(--err);
+      font-size: 11px;
+      display: none;
+    }
+    #toast.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>pmvibes // finance.monitor</h1>
+      <div class="sub">
+        <span>endpoint <kbd>/finance</kbd> <kbd>/finance/history/{page}</kbd></span>
+        <span id="clock">—</span>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="panel">
+        <div class="panel-head"><span>LIVE.STATUS</span><span id="liveChip">…</span></div>
+        <pre class="blk" id="liveBlock"></pre>
+        <pre class="blk" style="margin-top:0.6rem;color:var(--dim)" id="statBlock"></pre>
+        <pre class="blk" style="margin-top:0.55rem;color:var(--accent)" id="aiBlock"></pre>
+        <pre class="blk" style="margin-top:0.5rem;color:var(--cyan)" id="persistedPreview"></pre>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><span>HISTORY.CHANNEL</span></div>
+        <div class="bar">
+          <label><input type="checkbox" id="learnMode" /> learn=all events</label>
+          <button type="button" id="reloadHist">FETCH</button>
+          <span class="pager">
+            <button type="button" id="prevP">⟨</button>
+            <span id="pageLabel">page 1</span>
+            <button type="button" id="nextP">⟩</button>
+          </span>
+        </div>
+        <ul id="feed"></ul>
+      </section>
+    </div>
+
+    <div id="statusLine"></div>
+    <div id="toast"></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let historyPage = 1;
+    let historyMeta = { total_pages: 1 };
+
+    function showToast(msg) {
+      const t = $("toast");
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => t.classList.remove("show"), 8000);
+    }
+
+    function kindClass(kind) {
+      if (kind === "trade") return "k-trade";
+      if (kind === "skip") return "k-skip";
+      if (kind === "outcome") return "k-outcome";
+      return "";
+    }
+
+    function fmtNum(n, dec = 2) {
+      if (typeof n !== "number" || Number.isNaN(n)) return String(n);
+      return n.toFixed(dec);
+    }
+
+    function fmtStatus(s) {
+      const hl = $("liveChip");
+      const ok = !!(s.running && s.price_feed_healthy && s.ws_connected);
+      hl.innerHTML =
+        `<span style="color:${ok ? "var(--accent)" : "var(--err)"}">
+          ${ok ? "ONLINE" : "DEGRADED"}
+        </span>`;
+      const warn = !(s.price_feed_healthy && s.ws_connected);
+
+      let block = "";
+      block += `server_time ..... ${escapeHtml(String(s.server_time || "—"))}\n`;
+      block += `poly_time ....... ${escapeHtml(String(s.polymarket_time || "—"))}\n`;
+      block += `uptime .......... ${escapeHtml(String(s.uptime || "—"))}\n`;
+      block += `btc_live ........ ${fmtNum(s.current_btc_price, 2)}\n`;
+      block += `target .......... ${s.target_price != null ? fmtNum(s.target_price, 2) : "—"}\n`;
+      block += `price_diff ...... ${s.price_diff != null ? fmtNum(s.price_diff, 2) : "—"}\n`;
+      block += `t_end ........... ${escapeHtml(String(s.time_to_end || "—"))}\n`;
+      block += `price_age_s ..... ${fmtNum(s.price_age_seconds, 3)}\n`;
+      block += `feed_health ..... ${s.price_feed_healthy ? "OK" : "STALE_OR_DOWN"}`;
+      $("liveBlock").textContent = block;
+
+      const st = s.stats || {};
+      const sr = st.skip_reasons || {};
+      const skips = Object.keys(sr).length
+        ? Object.entries(sr).map(([k, v]) => `${k}:${v}`).join(" ")
+        : "none";
+      const statTxt =
+        `TOTALS\n` +
+        `  trades ..... ${st.total_trades ?? 0}\n` +
+        `  skips ...... ${st.total_skipped ?? 0}\n` +
+        `  wins ....... ${st.wins ?? 0}\n` +
+        `  losses ..... ${st.losses ?? 0}\n` +
+        `  pending .... ${st.pending ?? 0}\n` +
+        `  win_rate ... ${fmtNum(st.win_rate ?? 0, 4)}\n` +
+        `  pnl_usd .... ${fmtNum(st.total_pnl ?? 0, 4)}\n` +
+        `  skip_hist .. ${skips}`;
+      $("statBlock").textContent = statTxt;
+
+      const aiTxt = buildAIBrief(s);
+      $("aiBlock").textContent = aiTxt;
+
+      const pe = s.persisted_events;
+      let prev = "";
+      if (Array.isArray(pe) && pe.length) {
+        prev = `\nMEMORY_SNAPSHOT (last ${pe.length})\n`;
+        pe.slice(0, 15).forEach((e) => {
+          const summary = shortenData(e.kind, e.data);
+          prev += `  • ${escapeHtml(String(e.kind))} │ ${escapeHtml(summary)}\n`;
+        });
+      } else prev = `\nMEMORY_SNAPSHOT (use history_limit on /finance)\n`;
+      $("persistedPreview").textContent = prev;
+
+      return warn ? "WARN" : "OK";
+    }
+
+    function buildAIBrief(s) {
+      const st = s.stats || {};
+      const pnl = typeof st.total_pnl === "number" ? st.total_pnl : 0;
+      const wr = typeof st.win_rate === "number" ? st.win_rate : 0;
+      const feedOk = !!(s.price_feed_healthy && s.ws_connected);
+      const running = !!s.running;
+      const pending = st.pending ?? 0;
+
+      const mood =
+        !running ? "IDLE" :
+        !feedOk ? "SIGNAL LOST" :
+        pnl > 0.01 ? "EDGE POSITIVE" :
+        pnl < -0.01 ? "EDGE NEGATIVE" :
+        "EDGE UNKNOWN";
+
+      let out = "";
+      out += `AI.BRIEF ───────────────────────────────\n`;
+      out += `  mode ........ ${mood}\n`;
+      out += `  confidence .. ${feedOk ? (wr >= 0.55 ? "HIGH" : wr >= 0.50 ? "MED" : "LOW") : "LOW"}\n`;
+      out += `  attention ... ${pending > 0 ? `PENDING_TRADES=${pending}` : "NONE"}\n`;
+      out += `  note ........ ${feedOk ? "price stream ok" : "check websocket / feed age"}\n`;
+      return out;
+    }
+
+    function shortenData(kind, data) {
+      try {
+        const o =
+          typeof data === "string"
+            ? JSON.parse(data || "{}")
+            : data && typeof data === "object"
+              ? data
+              : {};
+        if (kind === "trade") {
+          const id = o.ID ?? "?";
+          const dir = o.Direction ?? o.direction ?? "?";
+          const outcome = o.Outcome ?? o.outcome ?? "?";
+          const pnl = typeof o.PnL === "number" ? fmtNum(o.PnL, 2) : (typeof o.pnl === "number" ? fmtNum(o.pnl, 2) : "?");
+          return `#${id} ${dir} ${outcome} pnl=$${pnl}`;
+        }
+        if (kind === "skip") return String(o.Reason ?? o.reason ?? "");
+        if (kind === "outcome") {
+          const mid = String(o.MarketID ?? o.market_id ?? "");
+          const res = o.Result ?? o.result ?? "";
+          const diff = typeof o.PriceDiff === "number" ? fmtNum(o.PriceDiff, 2) : "";
+          const our = typeof o.OurPnL === "number" ? fmtNum(o.OurPnL, 2) : "";
+          const tail = mid ? mid.slice(-8) : "market";
+          const extra = [res ? `res=${res}` : "", diff ? `Δ=${diff}` : "", our ? `pnl=$${our}` : ""].filter(Boolean).join(" ");
+          return extra ? `${tail} ${extra}` : tail;
+        }
+      } catch (_) {}
+      return "{}";
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    async function refreshStatus() {
+      const r = await fetch("/finance?history_limit=30", {
+        headers: { Accept: "application/json" },
+      });
+      if (!r.ok) throw new Error("GET /finance failed: " + r.status);
+      const s = await r.json();
+      return fmtStatus(s);
+    }
+
+    function renderHistory(h) {
+      historyMeta.total_pages = h.total_pages || 1;
+      $("pageLabel").textContent = `page ${h.page}/${h.total_pages || 1} · rows ${h.events?.length ?? 0}`;
+      const ul = $("feed");
+      ul.innerHTML = "";
+      (h.events || []).forEach((e) => {
+        const li = document.createElement("li");
+        li.className = kindClass(e.kind || "");
+        const ts = escapeHtml(String(e.ts || ""));
+        const k = escapeHtml(String(e.kind || "?"));
+        const pretty = prettifyPayload(e.kind, e.data);
+        li.innerHTML =
+          `<div><span class="ts">${ts}</span>` +
+          `<span class="kind" style="color:var(--accent)">[${k}]</span></div>` +
+          `<pre>${pretty}</pre>`;
+        ul.appendChild(li);
+      });
+      $("prevP").disabled = h.page <= 1;
+      $("nextP").disabled = historyMeta.total_pages && h.page >= historyMeta.total_pages;
+    }
+
+    function prettifyPayload(kind, data) {
+      let raw = data;
+      if (typeof data === "string") {
+        try {
+          raw = JSON.parse(data);
+        } catch {
+          raw = data;
+        }
+      }
+      if (typeof raw === "object" && raw !== null) {
+        return escapeHtml(JSON.stringify(raw, null, 2));
+      }
+      return escapeHtml(String(raw ?? ""));
+    }
+
+    async function refreshHistory() {
+      const learn = $("learnMode").checked ? "true" : "false";
+      const r = await fetch(`/finance/history/${historyPage}?learn=${learn}`, {
+        headers: { Accept: "application/json" },
+      });
+      if (!r.ok) throw new Error("GET /finance/history failed: " + r.status);
+      const h = await r.json();
+      renderHistory(h);
+    }
+
+    function tickClock() {
+      $("clock").textContent = new Date().toISOString();
+    }
+
+    async function pulse() {
+      tickClock();
+      const line = $("statusLine");
+      try {
+        const flag = await refreshStatus();
+        line.innerHTML =
+          `<span class="ok">[+]</span> /finance synced &nbsp;` +
+          `<span class="${flag === "OK" ? "ok" : "bad"}">${flag}</span>`;
+      } catch (err) {
+        line.innerHTML = `<span class="bad">[!]</span> status error — ${escapeHtml(err.message)}`;
+        showToast(String(err.message));
+      }
+      try {
+        await refreshHistory();
+        line.innerHTML += ` &nbsp;|&nbsp; <span class="ok">[+]</span> history p${historyPage}`;
+      } catch (err) {
+        line.innerHTML += ` &nbsp;|&nbsp; <span class="bad">[!]</span> history`;
+        showToast(String(err.message));
+      }
+    }
+
+    $("reloadHist").addEventListener("click", () => {
+      pulse();
+    });
+    $("prevP").addEventListener("click", () => {
+      if (historyPage > 1) {
+        historyPage--;
+        refreshHistory().catch((e) => showToast(String(e.message)));
+      }
+    });
+    $("nextP").addEventListener("click", () => {
+      if (historyPage < historyMeta.total_pages) {
+        historyPage++;
+        refreshHistory().catch((e) => showToast(String(e.message)));
+      }
+    });
+    $("learnMode").addEventListener("change", () => {
+      pulse();
+    });
+
+    tickClock();
+    setInterval(tickClock, 1000);
+    pulse().catch(() => {});
+    setInterval(() => pulse().catch(() => {}), 3000);
+  </script>
+</body>
+</html>

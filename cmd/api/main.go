@@ -47,6 +47,7 @@ func main() {
 	srv := server.New(cfg, logger, eventLog)
 
 	slog.Info("starting PMVibes server with BTC 5m simulator", "port", cfg.Port)
+	slog.Info("finance dashboard UI", "url", "http://localhost:"+cfg.Port+"/")
 	slog.Info("view simulation status at", "url", "http://localhost:"+cfg.Port+"/finance")
 	slog.Info("persisted audit trail", "url", "http://localhost:"+cfg.Port+"/finance/history/1")
 	if getEnv("REDIS_URL", "") != "" {

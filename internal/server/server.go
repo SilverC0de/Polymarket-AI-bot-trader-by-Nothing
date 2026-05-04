@@ -42,6 +42,7 @@ func (s *Server) registerRoutes() {
 
 	financeHandler := handler.NewFinanceHandler(s.simSvc, s.logger)
 
+	s.register("GET", "/", serveFinanceDashboard)
 	// Main finance endpoint - returns full simulation breakdown
 	s.register("GET", "/finance", financeHandler.GetStatus)
 	s.registerPattern("GET", "/finance/history/{page}", financeHandler.GetHistory)
