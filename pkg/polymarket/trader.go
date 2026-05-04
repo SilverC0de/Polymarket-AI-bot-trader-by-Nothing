@@ -189,7 +189,7 @@ func (t *Trader) PlaceMarketOrder(ctx context.Context, tokenID string, amountUSD
 	zeros32 := "0x" + strings.Repeat("00", 32)
 	reqBody := postOrderBody{
 		Order: orderWireBody{
-			Salt:          salt.String(),
+			Salt:          json.Number(salt.String()),
 			Maker:         order.Maker.Hex(),
 			Signer:        order.Signer.Hex(),
 			TokenID:       tokenID,
@@ -205,6 +205,8 @@ func (t *Trader) PlaceMarketOrder(ctx context.Context, tokenID string, amountUSD
 		},
 		Owner:     t.config.APIKey,
 		OrderType: "FAK",
+		DeferExec: false,
+		PostOnly:  false,
 	}
 
 	bodyJSON, err := json.Marshal(reqBody)
@@ -402,25 +404,27 @@ func (t *Trader) l2AuthHeaders(method, path, body string) map[string]string {
 // ── Wire body types ───────────────────────────────────────────────────────────
 
 type orderWireBody struct {
-	Salt          string `json:"salt"`
-	Maker         string `json:"maker"`
-	Signer        string `json:"signer"`
-	TokenID       string `json:"tokenId"`
-	MakerAmount   string `json:"makerAmount"`
-	TakerAmount   string `json:"takerAmount"`
-	Expiration    string `json:"expiration"`
-	Side          string `json:"side"`
-	SignatureType int    `json:"signatureType"`
-	Timestamp     string `json:"timestamp"`
-	Metadata      string `json:"metadata"`
-	Builder       string `json:"builder"`
-	Signature     string `json:"signature"`
+	Salt          json.Number `json:"salt"`
+	Maker         string      `json:"maker"`
+	Signer        string      `json:"signer"`
+	TokenID       string      `json:"tokenId"`
+	MakerAmount   string      `json:"makerAmount"`
+	TakerAmount   string      `json:"takerAmount"`
+	Expiration    string      `json:"expiration"`
+	Side          string      `json:"side"`
+	SignatureType int         `json:"signatureType"`
+	Timestamp     string      `json:"timestamp"`
+	Metadata      string      `json:"metadata"`
+	Builder       string      `json:"builder"`
+	Signature     string      `json:"signature"`
 }
 
 type postOrderBody struct {
 	Order     orderWireBody `json:"order"`
 	Owner     string        `json:"owner"`     // API key
 	OrderType string        `json:"orderType"` // "FOK"
+	DeferExec bool          `json:"deferExec"`
+	PostOnly  bool          `json:"postOnly"`
 }
 
 // ── ABI encoding helpers ──────────────────────────────────────────────────────
