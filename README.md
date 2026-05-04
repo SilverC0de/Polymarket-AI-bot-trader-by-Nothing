@@ -132,7 +132,7 @@ The server reads `.env` from the current working directory automatically.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/finance` | Current simulator status and latest events. Accepts optional `?history_limit=N`. |
-| `GET` | `/finance/history/{page}` | Paginated event history (200 events per page). |
+| `GET` | `/finance/history/{page}` | Paginated event history (10 events per page). |
 
 ### CLI simulator
 

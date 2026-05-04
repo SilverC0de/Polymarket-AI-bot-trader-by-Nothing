@@ -20,7 +20,7 @@ import (
 const MaxFinanceHistoryLimit = 10000
 
 // HistoryPageSize is the number of events per GET /finance/history/{page}.
-const HistoryPageSize int64 = 200
+const HistoryPageSize int64 = 10
 
 // PriceStaleAfter is how long without a price tick before we treat the feed as
 // unhealthy and stop creating/resolving markets against it. The Polymarket
