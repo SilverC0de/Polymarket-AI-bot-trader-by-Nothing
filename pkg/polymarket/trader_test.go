@@ -2,6 +2,7 @@ package polymarket
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
@@ -83,5 +84,27 @@ func TestBuildL2SignatureUsesURLSafeBase64(t *testing.T) {
 	}
 	if strings.ContainsAny(got, "+/") {
 		t.Fatalf("signature is not URL-safe base64: %q", got)
+	}
+}
+
+func TestOrderStatusCurrentDataOrderFields(t *testing.T) {
+	status := OrderStatus{
+		Status:      "ORDER_STATUS_MATCHED",
+		SizeMatched: "20202000",
+		Price:       "0.99",
+	}
+	status.normalize()
+
+	if status.Status != "matched" {
+		t.Fatalf("Status = %q, want matched", status.Status)
+	}
+	if got := status.FilledShares(); math.Abs(got-20.202) > 0.000001 {
+		t.Fatalf("FilledShares = %f, want 20.202", got)
+	}
+	if got := status.FillPrice(); math.Abs(got-0.99) > 0.000001 {
+		t.Fatalf("FillPrice = %f, want 0.99", got)
+	}
+	if got := status.FilledUSD(); math.Abs(got-19.99998) > 0.000001 {
+		t.Fatalf("FilledUSD = %f, want 19.99998", got)
 	}
 }

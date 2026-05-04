@@ -65,9 +65,11 @@ type TraderConfig struct {
 
 // OrderResult is returned by PlaceMarketOrder.
 type OrderResult struct {
-	OrderID  string `json:"orderID"`
-	Status   string `json:"status"`
-	ErrorMsg string `json:"error,omitempty"`
+	OrderID      string `json:"orderID"`
+	Status       string `json:"status"`
+	MakingAmount string `json:"makingAmount,omitempty"`
+	TakingAmount string `json:"takingAmount,omitempty"`
+	ErrorMsg     string `json:"error,omitempty"`
 }
 
 // OrderStatus is returned by GetOrderStatus.
@@ -75,35 +77,63 @@ type OrderStatus struct {
 	ID     string `json:"id"`
 	Status string `json:"status"` // "live" | "matched" | "cancelled"
 
-	// Collateral amounts in 6-decimal pUSD units (divide by 1e6 for USD).
+	// Legacy/order response fields: collateral amounts in 6-decimal pUSD units.
 	MakerAmount       string `json:"makerAmount"`
 	MakerAmountFilled string `json:"makerAmountFilled"`
 
-	// Outcome token amounts in 6-decimal units (divide by 1e6 for shares).
+	// Legacy/order response fields: outcome token amounts in 6-decimal units.
 	TakerAmount       string `json:"takerAmount"`
 	TakerAmountFilled string `json:"takerAmountFilled"`
+
+	// /data/order fields returned by current CLOB clients.
+	OriginalSize string `json:"original_size"`
+	SizeMatched  string `json:"size_matched"`
+	Price        string `json:"price"`
 }
 
 // FilledUSD returns the actual USD spent on this order (0 if unfilled).
 func (s *OrderStatus) FilledUSD() float64 {
-	n, _ := strconv.ParseFloat(s.MakerAmountFilled, 64)
-	return n / 1_000_000
+	if s.MakerAmountFilled != "" {
+		n, _ := strconv.ParseFloat(s.MakerAmountFilled, 64)
+		return n / collateralScale
+	}
+	shares, price := s.FilledShares(), s.FillPrice()
+	return shares * price
 }
 
 // FilledShares returns the actual outcome-token shares received (0 if unfilled).
 func (s *OrderStatus) FilledShares() float64 {
-	n, _ := strconv.ParseFloat(s.TakerAmountFilled, 64)
-	return n / 1_000_000
+	if s.TakerAmountFilled != "" {
+		n, _ := strconv.ParseFloat(s.TakerAmountFilled, 64)
+		return n / collateralScale
+	}
+	n, _ := strconv.ParseFloat(s.SizeMatched, 64)
+	return n / collateralScale
 }
 
 // FillPrice returns the actual average fill price (0 if unfilled).
 func (s *OrderStatus) FillPrice() float64 {
+	if s.Price != "" {
+		price, _ := strconv.ParseFloat(s.Price, 64)
+		return price
+	}
 	maker, _ := strconv.ParseFloat(s.MakerAmountFilled, 64)
 	taker, _ := strconv.ParseFloat(s.TakerAmountFilled, 64)
 	if taker == 0 {
 		return 0
 	}
 	return maker / taker
+}
+
+func (s *OrderStatus) normalize() {
+	switch s.Status {
+	case "ORDER_STATUS_LIVE":
+		s.Status = "live"
+	case "ORDER_STATUS_MATCHED":
+		s.Status = "matched"
+	case "ORDER_STATUS_CANCELED", "ORDER_STATUS_CANCELED_MARKET_RESOLVED", "ORDER_STATUS_INVALID":
+		s.Status = "cancelled"
+	}
 }
 
 // Trader places live FOK market orders on Polymarket CLOB V2.
@@ -305,7 +335,7 @@ func roundDownInt(amount float64, precision int64) int64 {
 // GetOrderStatus fetches the current status of an order from CLOB V2.
 // FAK orders settle within milliseconds; call this after a short delay.
 func (t *Trader) GetOrderStatus(ctx context.Context, orderID string) (*OrderStatus, error) {
-	path := "/order/" + orderID
+	path := "/data/order/" + orderID
 	headers := t.l2AuthHeaders("GET", path, "")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, clobBaseURL+path, nil)
@@ -331,6 +361,7 @@ func (t *Trader) GetOrderStatus(ctx context.Context, orderID string) (*OrderStat
 	if err := json.Unmarshal(body, &status); err != nil {
 		return nil, fmt.Errorf("decode order status: %w", err)
 	}
+	status.normalize()
 	return &status, nil
 }
 

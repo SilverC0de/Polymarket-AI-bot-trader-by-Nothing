@@ -48,11 +48,14 @@ type SimulatorService struct {
 	discoverer  *simulator.MarketDiscoverer
 	logger      *slog.Logger
 
-	currentPrice  float64
-	lastPriceAt   time.Time
-	running       bool
-	startTime     time.Time
-	logs          []LogEntry
+	currentPrice float64
+	lastPriceAt  time.Time
+	running      bool
+	startTime    time.Time
+	logs         []LogEntry
+
+	liveOrderMu     sync.Mutex
+	liveOrderTokens map[string]struct{}
 
 	eventLog store.EventRecorder
 }
@@ -66,25 +69,25 @@ type LogEntry struct {
 
 // SimulatorStatus is the response for /finance endpoint.
 type SimulatorStatus struct {
-	ServerTime     string `json:"server_time"`
-	PolymarketTime string `json:"polymarket_time"`
-	Running      bool                       `json:"running"`
-	Uptime       string                     `json:"uptime"`
-	CurrentPrice float64                    `json:"current_btc_price"`
-	TargetPrice  float64                    `json:"target_price,omitempty"`
-	PriceDiff    float64                    `json:"price_diff,omitempty"`
-	TimeToEnd    string                     `json:"time_to_end,omitempty"`
+	ServerTime     string  `json:"server_time"`
+	PolymarketTime string  `json:"polymarket_time"`
+	Running        bool    `json:"running"`
+	Uptime         string  `json:"uptime"`
+	CurrentPrice   float64 `json:"current_btc_price"`
+	TargetPrice    float64 `json:"target_price,omitempty"`
+	PriceDiff      float64 `json:"price_diff,omitempty"`
+	TimeToEnd      string  `json:"time_to_end,omitempty"`
 
 	// Health of the upstream BTC price feed. PriceAgeSeconds is the number of
 	// seconds since the last price tick was received; PriceFeedHealthy is
 	// false when the feed is silent for longer than PriceStaleAfter or the
 	// websocket has disconnected.
-	PriceAgeSeconds  float64 `json:"price_age_seconds"`
-	PriceFeedHealthy bool    `json:"price_feed_healthy"`
-	WSConnected      bool    `json:"ws_connected"`
-	Stats        SimStats                   `json:"stats"`
-	Trades       []simulator.SimulatedTrade `json:"trades"`
-	Outcomes     []simulator.MarketOutcome  `json:"market_outcomes"`
+	PriceAgeSeconds  float64                    `json:"price_age_seconds"`
+	PriceFeedHealthy bool                       `json:"price_feed_healthy"`
+	WSConnected      bool                       `json:"ws_connected"`
+	Stats            SimStats                   `json:"stats"`
+	Trades           []simulator.SimulatedTrade `json:"trades"`
+	Outcomes         []simulator.MarketOutcome  `json:"market_outcomes"`
 
 	// PersistedTotal is the in-memory event count (each append is also logged to stdout).
 	PersistedTotal int64 `json:"persisted_total,omitempty"`
@@ -111,13 +114,14 @@ func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *Sim
 	engine := simulator.NewEngine(strategy, client) // Pass client for real order book prices
 
 	s := &SimulatorService{
-		client:     client,
-		engine:     engine,
-		discoverer: simulator.NewMarketDiscoverer(client),
-		logger:     logger,
-		startTime:  time.Now(),
-		logs:       make([]LogEntry, 0),
-		eventLog:   eventLog,
+		client:          client,
+		engine:          engine,
+		discoverer:      simulator.NewMarketDiscoverer(client),
+		logger:          logger,
+		startTime:       time.Now(),
+		logs:            make([]LogEntry, 0),
+		liveOrderTokens: make(map[string]struct{}),
+		eventLog:        eventLog,
 	}
 
 	// Wire up live trading if LIVE_TRADING=true and all credentials are present.
@@ -142,6 +146,11 @@ func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *Sim
 		} else {
 			logger.Info("LIVE TRADING ENABLED")
 			engine.SetLiveTradeCallback(func(ctx context.Context, tokenID string, direction simulator.Direction, amountUSD, entryPrice float64) {
+				if !s.reserveLiveOrder(tokenID) {
+					logger.Warn("duplicate live order skipped", "direction", direction, "tokenID", tokenID)
+					return
+				}
+
 				result, err := trader.PlaceMarketOrder(ctx, tokenID, amountUSD, entryPrice)
 				if err != nil {
 					logger.Error("live order FAILED",
@@ -235,6 +244,17 @@ func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *Sim
 	})
 
 	return s
+}
+
+func (s *SimulatorService) reserveLiveOrder(tokenID string) bool {
+	s.liveOrderMu.Lock()
+	defer s.liveOrderMu.Unlock()
+
+	if _, exists := s.liveOrderTokens[tokenID]; exists {
+		return false
+	}
+	s.liveOrderTokens[tokenID] = struct{}{}
+	return true
 }
 
 func (s *SimulatorService) persistEvent(kind string, data any) {
