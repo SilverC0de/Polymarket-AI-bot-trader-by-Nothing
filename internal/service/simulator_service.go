@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -103,7 +104,6 @@ type SimStats struct {
 	TotalLosses  int            `json:"losses"`
 	TotalPending int            `json:"pending"`
 	WinRate      float64        `json:"win_rate"`
-	TotalPnL     float64        `json:"total_pnl"`
 	SkipReasons  map[string]int `json:"skip_reasons"`
 }
 
@@ -489,7 +489,6 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 			TotalLosses:  stats.TotalLosses,
 			TotalPending: stats.TotalPending,
 			WinRate:      stats.WinRate,
-			TotalPnL:     stats.TotalPnL,
 			SkipReasons:  make(map[string]int),
 		},
 		Trades:   s.engine.GetTrades(),
@@ -514,7 +513,7 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 			status.PersistedTotal = total
 		}
 		if evs, err := s.eventLog.ListRecent(ctx, int64(historyLimit)); err == nil {
-			status.PersistedEvents = evs
+			status.PersistedEvents = stripPersistedPnL(evs)
 		}
 	}
 
@@ -526,7 +525,8 @@ func (s *SimulatorService) PersistedRecent(ctx context.Context, limit int64) ([]
 	if s.eventLog == nil {
 		return nil, nil
 	}
-	return s.eventLog.ListRecent(ctx, limit)
+	evs, err := s.eventLog.ListRecent(ctx, limit)
+	return stripPersistedPnL(evs), err
 }
 
 // PersistedPaged returns events by offset from newest (offset 0 = newest row).
@@ -534,7 +534,8 @@ func (s *SimulatorService) PersistedPaged(ctx context.Context, offset, limit int
 	if s.eventLog == nil {
 		return nil, nil
 	}
-	return s.eventLog.ListRange(ctx, offset, limit)
+	evs, err := s.eventLog.ListRange(ctx, offset, limit)
+	return stripPersistedPnL(evs), err
 }
 
 // PersistedHistoryPaged returns one page of persisted events (newest first).
@@ -550,7 +551,7 @@ func (s *SimulatorService) PersistedHistoryPaged(ctx context.Context, offset, li
 			return nil, 0, err
 		}
 		evs, err := s.eventLog.ListRange(ctx, offset, limit)
-		return evs, total, err
+		return stripPersistedPnL(evs), total, err
 	}
 	n, err := s.eventLog.Len(ctx)
 	if err != nil {
@@ -569,7 +570,48 @@ func (s *SimulatorService) PersistedHistoryPaged(ctx context.Context, offset, li
 	if end > total {
 		end = total
 	}
-	return filtered[offset:end], total, nil
+	return stripPersistedPnL(filtered[offset:end]), total, nil
+}
+
+func stripPersistedPnL(events []store.PersistedEvent) []store.PersistedEvent {
+	if len(events) == 0 {
+		return events
+	}
+	out := make([]store.PersistedEvent, len(events))
+	copy(out, events)
+	for i := range out {
+		var payload any
+		if err := json.Unmarshal(out[i].Data, &payload); err != nil {
+			continue
+		}
+		removePnLKeys(payload)
+		if data, err := json.Marshal(payload); err == nil {
+			out[i].Data = data
+		}
+	}
+	return out
+}
+
+func removePnLKeys(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		for key, value := range x {
+			if isPnLKey(key) {
+				delete(x, key)
+				continue
+			}
+			removePnLKeys(value)
+		}
+	case []any:
+		for _, value := range x {
+			removePnLKeys(value)
+		}
+	}
+}
+
+func isPnLKey(key string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+	return normalized == "pnl" || normalized == "ourpnl" || normalized == "totalpnl"
 }
 
 // PersistedLen returns total persisted events held in memory for this process.

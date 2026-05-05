@@ -40,7 +40,7 @@ type SimulatedTrade struct {
 	RealOrderBook bool               // True if EntryPrice came from real order book, false if simulated
 	Outcome       TradeOutcome       // WIN, LOSE, or PENDING
 	FinalBTCPrice float64            // BTC price at market end
-	PnL           float64            // Profit/Loss in USD
+	PnL           float64            `json:"-"`                       // Profit/Loss in USD
 	DebugContext  *TradeDebugContext `json:"debug_context,omitempty"` // Only populated for losing trades
 }
 
@@ -79,7 +79,7 @@ type MarketOutcome struct {
 	PriceDiff    float64
 	WeTradedIt   bool
 	OurDirection Direction
-	OurPnL       float64
+	OurPnL       float64 `json:"-"`
 }
 
 // LiveTradeFunc is called immediately when the strategy fires a signal, before
