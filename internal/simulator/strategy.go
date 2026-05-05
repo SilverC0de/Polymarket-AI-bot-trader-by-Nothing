@@ -58,7 +58,7 @@ type MarketState struct {
 
 // StrategyConfig holds the trading strategy parameters.
 type StrategyConfig struct {
-	MinPriceDiff       float64       // Minimum price difference from target ($40)
+	MinPriceDiff       float64       // Minimum price difference from target ($70)
 	MaxPriceDiff       float64       // Maximum price difference from target ($120)
 	MinTimeToEnd       time.Duration // Minimum time before market ends (1 min)
 	MaxTimeToEnd       time.Duration // Maximum time before market ends (3 min)
@@ -83,26 +83,26 @@ type StrategyConfig struct {
 // DefaultStrategyConfig returns the default configuration based on user requirements.
 func DefaultStrategyConfig() StrategyConfig {
 	return StrategyConfig{
-		MinPriceDiff:       40.0,
+		MinPriceDiff:       70.0,
 		MaxPriceDiff:       120.0,
 		MinTimeToEnd:       20 * time.Second,
 		MaxTimeToEnd:       2 * time.Minute,
-		TradeSize:          10.0,
+		TradeSize:          20.0,
 		TrendSampleCount:   5,
-		MomentumSamples:    3,  // Check last 3 samples
-		MinMomentum:        0.5, // Must be moving away at $0.50/sec minimum (for small cushions)
-		MaxRecentMove:         50.0,             // Absolute cap: skip if moved >$50 regardless of cushion
-		MaxRecentMoveRatio:    0.70,             // Skip if recent move > 70% of cushion
-		RecentMoveLookback:    60 * time.Second, // Check last 60 seconds
-		MaxEntryPrice:         0.995,            // Order book check - slightly more lenient
-		MinProfitUSD:          0.10,             // Order book check - very lenient
-		// Cushion-based scaling for momentum
-		LargeCushionThreshold: 50.0, // Cushions >= $50 get relaxed momentum check
+		MomentumSamples:    3,                // Check last 3 samples
+		MinMomentum:        0.5,              // Must be moving away at $0.50/sec minimum (for small cushions)
+		MaxRecentMove:      50.0,             // Absolute cap: skip if moved >$50 regardless of cushion
+		MaxRecentMoveRatio: 0.70,             // Skip if recent move > 70% of cushion
+		RecentMoveLookback: 60 * time.Second, // Check last 60 seconds
+		MaxEntryPrice:      0.995,            // Order book check - slightly more lenient
+		MinProfitUSD:       0.10,             // Order book check - very lenient
+		// Cushion-based scaling for momentum (threshold must be <= MinPriceDiff to be active)
+		LargeCushionThreshold: 70.0, // Cushions >= $70 get relaxed momentum check
 		LargeCushionMomentum:  0.15, // Only need $0.15/sec momentum with large cushion
 		// Dangerous pattern filter (all 3 must be true to reject)
-		DangerCushionLimit:    60.0,  // Cushion must be < $60 to be risky
-		DangerPositionLimit:   0.35,  // Position must be < 35% to be risky
-		DangerPullbackPercent: 45.0,  // Pullback must be > 45% of cushion to be risky
+		DangerCushionLimit:    70.0, // Cushion must be < $70 to be risky
+		DangerPositionLimit:   0.35, // Position must be < 35% to be risky
+		DangerPullbackPercent: 45.0, // Pullback must be > 45% of cushion to be risky
 	}
 }
 
@@ -199,16 +199,16 @@ func (s *Strategy) EvaluateEntry(state *MarketState, currentPrice float64, now t
 	recentMove := s.calculateRecentMove(state.PriceHistory, trend)
 	maxAllowedByRatio := absDiff * s.config.MaxRecentMoveRatio
 	remainingCushion := absDiff - recentMove
-	
+
 	// Only skip if BOTH conditions are violated (recent move is dangerous by both measures)
 	if recentMove > s.config.MaxRecentMove && recentMove > maxAllowedByRatio {
-		return DirectionNone, SkipOverextended, fmt.Sprintf("recent move $%.2f exceeds both abs cap $%.2f and %.0f%% of cushion ($%.2f)", 
+		return DirectionNone, SkipOverextended, fmt.Sprintf("recent move $%.2f exceeds both abs cap $%.2f and %.0f%% of cushion ($%.2f)",
 			recentMove, s.config.MaxRecentMove, s.config.MaxRecentMoveRatio*100, maxAllowedByRatio)
 	}
-	
+
 	// Also skip if remaining cushion after the move is too small (less than MinPriceDiff)
 	if remainingCushion < s.config.MinPriceDiff {
-		return DirectionNone, SkipOverextended, fmt.Sprintf("remaining cushion $%.2f after $%.2f move, need >= $%.2f", 
+		return DirectionNone, SkipOverextended, fmt.Sprintf("remaining cushion $%.2f after $%.2f move, need >= $%.2f",
 			remainingCushion, recentMove, s.config.MinPriceDiff)
 	}
 
