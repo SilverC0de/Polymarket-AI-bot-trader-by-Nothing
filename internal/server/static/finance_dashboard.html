@@ -161,6 +161,27 @@
       box-shadow: var(--shadow);
       backdrop-filter: blur(18px);
     }
+    /* Performance = primary read for edge / P&L — stands out from Overview + Details */
+    .panel--performance {
+      border-color: rgba(52, 211, 153, 0.5);
+      background:
+        linear-gradient(145deg, rgba(52, 211, 153, 0.09) 0%, transparent 52%),
+        var(--panel);
+      box-shadow:
+        var(--shadow),
+        0 0 0 1px rgba(52, 211, 153, 0.14) inset;
+    }
+    .panel--performance .panel-head {
+      border-bottom-color: rgba(52, 211, 153, 0.3);
+      background: linear-gradient(90deg, rgba(52, 211, 153, 0.12), transparent 70%);
+    }
+    .panel--performance .panel-head > span:first-child {
+      color: var(--good);
+      text-shadow: 0 0 28px rgba(52, 211, 153, 0.35);
+    }
+    .panel--performance .panel-head .hint {
+      color: rgba(167, 243, 208, 0.85);
+    }
     .panel-body { padding: 18px; }
     .panel-head {
       display: flex;
@@ -418,7 +439,7 @@
           </div>
         </article>
 
-        <article class="panel">
+        <article class="panel panel--performance" aria-label="Performance metrics">
           <div class="panel-head"><span>Performance</span><span class="hint">stats + interpretation</span></div>
           <div class="panel-body metric-columns">
             <pre class="blk" id="statBlock"></pre>
@@ -798,13 +819,16 @@
       $("clock").textContent = new Date().toISOString();
     }
 
-    async function pulse() {
-      tickClock();
+    async function pulseLive() {
       try {
         await refreshStatus();
       } catch (err) {
         showToast(String(err.message));
       }
+    }
+
+    async function pulse() {
+      await pulseLive();
       try {
         await refreshHistory();
       } catch (err) {
@@ -828,13 +852,13 @@
       }
     });
     $("learnMode").addEventListener("change", () => {
-      pulse();
+      refreshHistory().catch((e) => showToast(String(e.message)));
     });
 
     tickClock();
     setInterval(tickClock, 1000);
     pulse().catch(() => {});
-    setInterval(() => pulse().catch(() => {}), 3000);
+    setInterval(() => pulseLive().catch(() => {}), 3000);
   </script>
 </body>
 </html>
