@@ -78,14 +78,13 @@ Polymarket routes **new** API integrations through a **deposit wallet**: on-chai
 **In `.env`:**
 
 - `POLYMARKET_SIG_TYPE=3`
-- `POLYMARKET_DEPOSIT_WALLET=0x…` — your deposit wallet (must match the address the CLOB expects for your account)
-- `POLYMARKET_PROXY_WALLET` — optional for the bot in type `3` mode; you may keep it equal to the deposit address for your own notes
+- `POLYMARKET_PROXY_WALLET=0x…` — your deposit wallet / profile funder address (must match the address the CLOB expects for your account)
 
 **Generate CLOB API keys** with the owner EOA private key while configuring the deposit wallet funder + `POLY_1271`:
 
 ```bash
 POLYMARKET_PRIVATE_KEY=0x<your-64-hex-private-key> \
-POLYMARKET_DEPOSIT_WALLET=0x<deposit-wallet-from-profile-or-derivation> \
+POLYMARKET_PROXY_WALLET=0x<deposit-wallet-from-profile-or-derivation> \
 POLYMARKET_SIG_TYPE=3 \
 node scripts/gen-api-keys.mjs
 ```
@@ -138,9 +137,9 @@ POLYMARKET_PRIVATE_KEY=0x<your-64-hex-private-key> node scripts/gen-api-keys.mjs
 **Consistency checklist**
 
 - **`POLYMARKET_SIG_TYPE` in `.env`** must match how you ran `gen-api-keys.mjs`.
-- **L2 auth vs order signer:** for type `3`, `POLY_ADDRESS` is the owner EOA used to derive the API key, while the CLOB order itself uses `POLYMARKET_DEPOSIT_WALLET` for both `maker` and `signer`. For types `1` and `2`, `POLY_ADDRESS` is the proxy / funder; for type `0`, it is the EOA.
+- **L2 auth vs order signer:** for type `3`, `POLY_ADDRESS` is the owner EOA used to derive the API key, while the CLOB order itself uses `POLYMARKET_PROXY_WALLET` for both `maker` and `signer`. For types `1` and `2`, `POLY_ADDRESS` is the proxy / funder; for type `0`, it is the EOA.
 - After **creating a new Polymarket account** or changing login method, regenerate API credentials and update all three `POLYMARKET_API_*` variables.
-- If orders fail with **maker address not allowed** or **deposit wallet** messaging, see the [migration doc](https://docs.polymarket.com/trading/deposit-wallet-migration): use type `3`, set `POLYMARKET_DEPOSIT_WALLET`, regenerate CLOB keys for that funder, and ensure collateral is on the deposit wallet.
+- If orders fail with **maker address not allowed** or **deposit wallet** messaging, see the [migration doc](https://docs.polymarket.com/trading/deposit-wallet-migration): use type `3`, set `POLYMARKET_PROXY_WALLET` to the deposit wallet address, regenerate CLOB keys for that funder, and ensure collateral is on the deposit wallet.
 
 ---
 
@@ -155,8 +154,7 @@ POLYMARKET_PRIVATE_KEY=0x<your-64-hex-private-key> node scripts/gen-api-keys.mjs
 | `POLYMARKET_API_SECRET` | Live trading | CLOB API secret (from `gen-api-keys.mjs`) |
 | `POLYMARKET_API_PASSPHRASE` | Live trading | CLOB API passphrase (from `gen-api-keys.mjs`) |
 | `POLYMARKET_SIG_TYPE` | Live trading | `0` = EOA. `1` = POLY_PROXY. `2` = GNOSIS_SAFE. `3` = POLY_1271 / **deposit wallet** (new API users). |
-| `POLYMARKET_DEPOSIT_WALLET` | Live trading when `POLYMARKET_SIG_TYPE=3` | `0x…` deposit wallet used as order maker/signer. L2 auth remains tied to the owner EOA. |
-| `POLYMARKET_PROXY_WALLET` | Live trading when **not** type `3` | Proxy / funder from profile for types `1`–`2`; for type `0`, your EOA address. Ignored for order placement when using type `3` (deposit wallet replaces maker/signer). |
+| `POLYMARKET_PROXY_WALLET` | Live trading | Proxy / funder from profile for types `1`–`2`; for type `3`, the deposit wallet used as order maker/signer; for type `0`, your EOA address. |
 | `REDIS_URL` | No | Redis connection string. If empty, event log is in-memory only. |
 
 The Go application does **not** need any relayer credentials — the relayer is only used via `setup-deposit-wallet.mjs` (a one-time setup script), which reads `POLYMARKET_API_KEY/SECRET/PASSPHRASE` directly.

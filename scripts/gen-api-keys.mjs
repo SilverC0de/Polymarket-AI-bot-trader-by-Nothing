@@ -3,7 +3,7 @@
  *
  * Usage:
  *   # Deposit wallet (POLY_1271 — new API users):
- *   POLYMARKET_PRIVATE_KEY=0x... POLYMARKET_DEPOSIT_WALLET=0x... POLYMARKET_SIG_TYPE=3 node scripts/gen-api-keys.mjs
+ *   POLYMARKET_PRIVATE_KEY=0x... POLYMARKET_PROXY_WALLET=0x... POLYMARKET_SIG_TYPE=3 node scripts/gen-api-keys.mjs
  *
  *   # POLY_PROXY legacy (email/social login):
  *   POLYMARKET_PRIVATE_KEY=0x... POLYMARKET_PROXY_WALLET=0x... POLYMARKET_SIG_TYPE=1 node scripts/gen-api-keys.mjs
@@ -21,13 +21,12 @@ import { polygon } from "viem/chains";
 
 const PRIVATE_KEY = process.env.POLYMARKET_PRIVATE_KEY;
 const PROXY_WALLET = process.env.POLYMARKET_PROXY_WALLET;
-const DEPOSIT_WALLET = process.env.POLYMARKET_DEPOSIT_WALLET;
 const SIG_TYPE = process.env.POLYMARKET_SIG_TYPE ? parseInt(process.env.POLYMARKET_SIG_TYPE, 10) : 0;
 
 if (!PRIVATE_KEY) {
   console.error("Error: POLYMARKET_PRIVATE_KEY environment variable is not set.");
   console.error("\nUsage (deposit wallet / POLY_1271):");
-  console.error("  POLYMARKET_PRIVATE_KEY=0x... POLYMARKET_DEPOSIT_WALLET=0x... POLYMARKET_SIG_TYPE=3 node scripts/gen-api-keys.mjs");
+  console.error("  POLYMARKET_PRIVATE_KEY=0x... POLYMARKET_PROXY_WALLET=0x... POLYMARKET_SIG_TYPE=3 node scripts/gen-api-keys.mjs");
   process.exit(1);
 }
 
@@ -46,13 +45,13 @@ const clientConfig = {
 };
 
 if (SIG_TYPE === 3) {
-  if (!DEPOSIT_WALLET) {
-    console.error("Error: POLYMARKET_DEPOSIT_WALLET must be set for POLY_1271 (sig type 3).");
-    console.error("Run setup-deposit-wallet.mjs first to deploy your deposit wallet.");
+  if (!PROXY_WALLET) {
+    console.error("Error: POLYMARKET_PROXY_WALLET must be set to your deposit wallet for POLY_1271 (sig type 3).");
+    console.error("Run setup-deposit-wallet.mjs first to derive or deploy your deposit wallet.");
     process.exit(1);
   }
-  console.log(`Configuring deposit wallet funder (POLY_1271): ${DEPOSIT_WALLET}`);
-  clientConfig.funderAddress = DEPOSIT_WALLET;
+  console.log(`Configuring deposit wallet funder (POLY_1271): ${PROXY_WALLET}`);
+  clientConfig.funderAddress = PROXY_WALLET;
   clientConfig.signatureType = SignatureTypeV2.POLY_1271;
 } else if (PROXY_WALLET && (SIG_TYPE === 1 || SIG_TYPE === 2)) {
   console.log(`Registering API key for proxy wallet (POLY_PROXY): ${PROXY_WALLET}`);
@@ -78,7 +77,7 @@ console.log(`POLYMARKET_API_SECRET=${creds.secret}`);
 console.log(`POLYMARKET_API_PASSPHRASE=${creds.passphrase}`);
 console.log("\n============================================");
 if (SIG_TYPE === 3) {
-  console.log(`\nDeposit wallet funder: ${DEPOSIT_WALLET}`);
+  console.log(`\nDeposit wallet funder: ${PROXY_WALLET}`);
 } else if (PROXY_WALLET) {
   console.log(`\nAPI key registered for proxy wallet: ${PROXY_WALLET}`);
 }

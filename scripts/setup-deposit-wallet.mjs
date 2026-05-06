@@ -11,9 +11,9 @@
  *   node scripts/setup-deposit-wallet.mjs
  *
  * After running:
- *   1. Set POLYMARKET_DEPOSIT_WALLET=<printed address> in .env
+ *   1. Set POLYMARKET_PROXY_WALLET=<printed address> in .env
  *   2. Transfer pUSD to that deposit wallet address (NOT your EOA)
- *   3. Run gen-api-keys.mjs with POLYMARKET_DEPOSIT_WALLET + POLYMARKET_SIG_TYPE=3
+ *   3. Run gen-api-keys.mjs with POLYMARKET_PROXY_WALLET + POLYMARKET_SIG_TYPE=3
  *   4. Set POLYMARKET_SIG_TYPE=3 and LIVE_TRADING=true in .env
  */
 
@@ -134,12 +134,12 @@ console.log("Setup complete!");
 console.log("══════════════════════════════════════════════════════\n");
 console.log("Next steps:\n");
 console.log(`  1. Add to .env:`);
-console.log(`       POLYMARKET_DEPOSIT_WALLET=${depositWalletAddress}`);
+console.log(`       POLYMARKET_PROXY_WALLET=${depositWalletAddress}`);
 console.log(`       POLYMARKET_SIG_TYPE=3`);
 console.log(`  2. Transfer pUSD to the deposit wallet (NOT to your EOA):`);
 console.log(`       ${depositWalletAddress}`);
 console.log(`  3. Generate new API keys for the deposit wallet:`);
-console.log(`       POLYMARKET_PRIVATE_KEY=... POLYMARKET_DEPOSIT_WALLET=${depositWalletAddress} POLYMARKET_SIG_TYPE=3 node scripts/gen-api-keys.mjs`);
+console.log(`       POLYMARKET_PRIVATE_KEY=... POLYMARKET_PROXY_WALLET=${depositWalletAddress} POLYMARKET_SIG_TYPE=3 node scripts/gen-api-keys.mjs`);
 console.log(`  4. Update POLYMARKET_API_KEY/SECRET/PASSPHRASE in .env with the new keys`);
 console.log(`  5. Enable live trading: LIVE_TRADING=true`);
 console.log("\npUSD on the EOA does NOT count as CLOB buying power — it must be in the deposit wallet.");
