@@ -28,6 +28,10 @@ const HistoryPageSize int64 = 10
 // chainlink BTC stream pushes well under 1Hz, so 15s is generous.
 const PriceStaleAfter = 15 * time.Second
 
+// skipMarketsWarmupEnv disables the post-startup wait for the next full 5-minute
+// BTC window before market discovery runs (local/dev only).
+const skipMarketsWarmupEnv = "SIM_SKIP_MARKET_WARMUP"
+
 // readableTimeLayout matches e.g. "2026-05-03 1:05 am" (12-hour clock, no leading zero on hour).
 const readableTimeLayout = "2006-01-02 3:04 pm"
 
@@ -39,6 +43,15 @@ var polymarketTZ = func() *time.Location {
 	}
 	return loc
 }()
+
+// nextFullBTC5mWindow is the next wall-clock instant aligned to a Polymarket BTC
+// 5m candle open (epoch multiples of 300s). Used after deploy so discovery only
+// begins on a fresh window.
+func nextFullBTC5mWindow(now time.Time) time.Time {
+	sec := now.Unix()
+	next := (sec/300 + 1) * 300
+	return time.Unix(next, 0)
+}
 
 // SimulatorService manages the BTC 5m trading simulation.
 type SimulatorService struct {
@@ -53,7 +66,10 @@ type SimulatorService struct {
 	lastPriceAt  time.Time
 	running      bool
 	startTime    time.Time
-	logs         []LogEntry
+	// marketsReadyAt is when market discovery may begin (next 5m boundary after
+	// startup). Zero means no deferred start (warmup disabled).
+	marketsReadyAt time.Time
+	logs           []LogEntry
 
 	liveOrderMu     sync.Mutex
 	liveOrderTokens map[string]struct{}
@@ -85,12 +101,17 @@ type SimulatorStatus struct {
 	// seconds since the last price tick was received; PriceFeedHealthy is
 	// false when the feed is silent for longer than PriceStaleAfter or the
 	// websocket has disconnected.
-	PriceAgeSeconds  float64                    `json:"price_age_seconds"`
-	PriceFeedHealthy bool                       `json:"price_feed_healthy"`
-	WSConnected      bool                       `json:"ws_connected"`
-	Stats            SimStats                   `json:"stats"`
-	Trades           []simulator.SimulatedTrade `json:"trades"`
-	Outcomes         []simulator.MarketOutcome  `json:"market_outcomes"`
+	PriceAgeSeconds  float64 `json:"price_age_seconds"`
+	PriceFeedHealthy bool    `json:"price_feed_healthy"`
+	WSConnected      bool    `json:"ws_connected"`
+	// WarmingUp is true until the next full 5-minute window after startup, when
+	// market discovery is intentionally idle so the price feed can capture a boundary.
+	WarmingUp          bool                       `json:"warming_up,omitempty"`
+	MarketsReadyAt     string                     `json:"markets_ready_at,omitempty"`      // RFC3339 UTC
+	TimeToMarketsReady string                     `json:"time_to_markets_ready,omitempty"` // countdown while warming up
+	Stats              SimStats                   `json:"stats"`
+	Trades             []simulator.SimulatedTrade `json:"trades"`
+	Outcomes           []simulator.MarketOutcome  `json:"market_outcomes"`
 
 	// PersistedTotal is the in-memory event count (each append is also logged to stdout).
 	PersistedTotal int64 `json:"persisted_total,omitempty"`
@@ -318,6 +339,22 @@ func (s *SimulatorService) Start(ctx context.Context) error {
 	}
 	s.addLog("INFO", "Connected to Polymarket price stream")
 
+	var readyAt time.Time
+	if !strings.EqualFold(os.Getenv(skipMarketsWarmupEnv), "true") {
+		readyAt = nextFullBTC5mWindow(time.Now())
+	}
+	s.mu.Lock()
+	s.marketsReadyAt = readyAt
+	s.mu.Unlock()
+	if !readyAt.IsZero() {
+		wait := time.Until(readyAt).Round(time.Second)
+		s.logger.Info("market discovery warmup — waiting for next full 5m window",
+			"markets_ready_at_utc", readyAt.UTC().Format(time.RFC3339),
+			"wait", wait.String())
+		s.addLog("INFO", fmt.Sprintf("Warmup: price feed live; market discovery begins at %s UTC (in %s)",
+			readyAt.UTC().Format(time.RFC3339), wait))
+	}
+
 	// Start market discovery
 	go s.marketDiscoveryLoop(ctx)
 
@@ -348,7 +385,12 @@ func (s *SimulatorService) discoverMarkets(ctx context.Context) {
 	s.mu.RLock()
 	currentPrice := s.currentPrice
 	lastAt := s.lastPriceAt
+	readyAt := s.marketsReadyAt
 	s.mu.RUnlock()
+
+	if !readyAt.IsZero() && time.Now().Before(readyAt) {
+		return
+	}
 
 	if currentPrice == 0 {
 		return
@@ -457,6 +499,7 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 	startTime := s.startTime
 	lastPriceAt := s.lastPriceAt
 	priceClient := s.priceClient
+	marketsReadyAt := s.marketsReadyAt
 	s.mu.RUnlock()
 
 	var priceAge float64
@@ -510,6 +553,12 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 	trendDir := s.engine.GetTrendForClosestMarket()
 	if trendDir != simulator.DirectionNone {
 		status.Trend = string(trendDir)
+	}
+
+	if !marketsReadyAt.IsZero() && now.Before(marketsReadyAt) {
+		status.WarmingUp = true
+		status.MarketsReadyAt = marketsReadyAt.UTC().Format(time.RFC3339)
+		status.TimeToMarketsReady = time.Until(marketsReadyAt).Round(time.Second).String()
 	}
 
 	if historyLimit > 0 && s.eventLog != nil {
