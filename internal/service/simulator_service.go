@@ -78,6 +78,8 @@ type SimulatorStatus struct {
 	TargetPrice    float64 `json:"target_price,omitempty"`
 	PriceDiff      float64 `json:"price_diff,omitempty"`
 	TimeToEnd      string  `json:"time_to_end,omitempty"`
+	// Trend is UP, DOWN, or NONE from strategy price history for the soonest-ending active market.
+	Trend string `json:"trend,omitempty"`
 
 	// Health of the upstream BTC price feed. PriceAgeSeconds is the number of
 	// seconds since the last price tick was received; PriceFeedHealthy is
@@ -503,6 +505,11 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 		status.TargetPrice = target
 		status.PriceDiff = currentPrice - target
 		status.TimeToEnd = timeToEnd.Round(time.Second).String()
+	}
+
+	trendDir := s.engine.GetTrendForClosestMarket()
+	if trendDir != simulator.DirectionNone {
+		status.Trend = string(trendDir)
 	}
 
 	if historyLimit > 0 && s.eventLog != nil {

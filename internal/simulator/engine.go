@@ -526,6 +526,28 @@ func (e *Engine) GetClosestMarketTarget() (float64, time.Duration, bool) {
 	return closestTarget, closestTime, found
 }
 
+// GetTrendForClosestMarket returns the strategy trend (UP/DOWN/NONE) for the
+// soonest-ending active market — the same market used for target price on /finance.
+func (e *Engine) GetTrendForClosestMarket() Direction {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	now := time.Now()
+	var closest *MarketState
+	var closestTime time.Duration = 999 * time.Hour
+	for _, state := range e.marketStates {
+		timeToEnd := state.EndTime.Sub(now)
+		if timeToEnd > 0 && timeToEnd < closestTime {
+			closestTime = timeToEnd
+			closest = state
+		}
+	}
+	if closest == nil {
+		return DirectionNone
+	}
+	return e.strategy.determineTrend(closest.PriceHistory)
+}
+
 // GetStats returns current simulation statistics.
 func (e *Engine) GetStats() SimulationStats {
 	e.mu.RLock()

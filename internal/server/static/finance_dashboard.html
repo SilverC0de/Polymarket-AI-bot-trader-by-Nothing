@@ -119,40 +119,17 @@
       line-height: 1.02;
       letter-spacing: -0.035em;
     }
-    .sub {
-      position: relative;
-      max-width: 760px;
-      margin-top: 16px;
-      color: var(--muted);
-      font-size: 16px;
-    }
-    .endpoint-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-      margin-top: 18px;
-      color: var(--dim);
-      font-family: var(--mono);
-      font-size: 12px;
-    }
-    kbd {
-      padding: 6px 10px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      background: rgba(3, 7, 18, 0.70);
-      color: var(--accent);
-      font: inherit;
-    }
     .layout {
       display: grid;
-      grid-template-columns: minmax(0, 0.94fr) minmax(390px, 1.06fr);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: 18px;
       align-items: stretch;
     }
-    .stack {
-      display: grid;
-      gap: 18px;
+    .historyPanel {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel-strong);
     }
     .panel {
       border: 1px solid var(--border);
@@ -161,7 +138,7 @@
       box-shadow: var(--shadow);
       backdrop-filter: blur(18px);
     }
-    /* Performance = primary read for edge / P&L — stands out from Overview + Details */
+    /* Performance = primary read — top row, left */
     .panel--performance {
       border-color: rgba(52, 211, 153, 0.5);
       background:
@@ -200,48 +177,88 @@
       letter-spacing: 0;
       text-transform: none;
     }
-    .overview-copy {
-      max-width: 680px;
-      color: var(--muted);
-      font-size: 16px;
-    }
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      margin-top: 16px;
-    }
-    .pill {
-      display: inline-flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      min-height: 42px;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      background: rgba(3, 7, 18, 0.42);
-      color: var(--muted);
-      font-family: var(--mono);
-      font-size: 13px;
-      white-space: nowrap;
-    }
-    .pill b {
+    .overview-head {
+      text-transform: none;
+      letter-spacing: 0.04em;
+      font-size: 12px;
+      font-weight: 600;
       color: var(--text);
+      line-height: 1.35;
+    }
+    .overview-head .overview-since-value {
       font-weight: 700;
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
     }
-    pre.blk {
-      margin: 0;
-      white-space: pre-wrap;
-      word-break: break-word;
-      color: var(--text);
-      font: 13px/1.72 var(--mono);
+    .receipt {
+      font: 13px/1.55 var(--mono);
+      border: 1px solid rgba(178, 198, 226, 0.22);
+      border-radius: 16px;
+      overflow: hidden;
+      background: rgba(3, 7, 18, 0.45);
     }
-    .metric-columns {
+    .receipt-row {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 18px;
+      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr);
+      gap: 10px 18px;
+      align-items: start;
+      padding: 11px 15px;
+      border-bottom: 1px dashed rgba(178, 198, 226, 0.2);
     }
+    .receipt-row:last-child {
+      border-bottom: none;
+    }
+    .receipt-row--skips {
+      align-items: start;
+    }
+    /* Match other receipt values: sit on the right side of the grid cell */
+    .receipt-v--skips {
+      display: flex;
+      justify-content: flex-end;
+      text-align: left;
+    }
+    .skip-reason-list {
+      margin: 0;
+      padding-left: 1.35em;
+      list-style: disc;
+      list-style-position: outside;
+      color: var(--text);
+      text-align: left;
+    }
+    .skip-reason-item {
+      margin-bottom: 12px;
+    }
+    .skip-reason-item:last-child {
+      margin-bottom: 0;
+    }
+    .skip-reason-head {
+      display: block;
+      color: var(--text);
+      font-weight: 650;
+    }
+    .receipt-k {
+      color: var(--dim);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+    }
+    .receipt-v {
+      margin: 0;
+      color: var(--text);
+      font-weight: 600;
+      text-align: right;
+      word-break: break-word;
+    }
+    .receipt-row--highlight {
+      background: rgba(125, 211, 252, 0.06);
+      border-bottom-style: solid;
+      border-bottom-color: rgba(125, 211, 252, 0.2);
+    }
+    .receipt-row--highlight .receipt-v {
+      color: var(--good);
+    }
+    .receipt-v--ok { color: var(--good) !important; }
+    .receipt-v--caution { color: var(--warn) !important; }
+    .receipt-v--bad { color: var(--err) !important; }
     .bar {
       display: flex;
       flex-wrap: wrap;
@@ -276,39 +293,37 @@
     }
     input[type="checkbox"] { accent-color: var(--accent); }
     .hint { color: var(--muted); }
-    .historyPanel {
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-      min-height: 0;
-      background: var(--panel-strong);
-    }
     .history-toolbar {
       display: grid;
       gap: 12px;
       padding: 16px 18px;
       border-bottom: 1px solid var(--border);
     }
-    .pager {
-      display: inline-flex;
-      gap: 8px;
+    .history-pager {
+      display: flex;
+      justify-content: center;
       align-items: center;
-      margin-left: auto;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 16px 18px;
+      border-top: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    #pageLabel {
+      min-width: 9em;
+      text-align: center;
     }
     #histSummary {
       color: var(--muted);
       font-size: 14px;
     }
     #feed {
-      flex: 1;
-      min-height: 0;
-      overflow-y: auto;
       margin: 0;
-      padding: 14px;
+      padding: 14px 18px;
       list-style: none;
       font-size: 13px;
-      scrollbar-color: rgba(103, 232, 249, 0.35) transparent;
     }
     #feed li {
       border: 1px solid rgba(139, 162, 194, 0.18);
@@ -376,18 +391,21 @@
       box-shadow: var(--shadow);
     }
     #toast.show { display: block; }
+    .feed-strip {
+      margin-top: 28px;
+      padding: 10px 8px 4px;
+      border: none;
+      background: transparent;
+      font: 12px/1.45 var(--mono);
+      text-align: center;
+    }
+    .feed-strip-k {
+      color: var(--dim);
+    }
     @media (max-width: 980px) {
-      .layout,
-      .metric-columns,
-      .kpi-grid {
+      .layout {
         grid-template-columns: 1fr;
       }
-      .historyPanel {
-        position: static;
-        height: auto;
-        min-height: auto;
-      }
-      #feed { min-height: 320px; }
     }
     @media (max-width: 640px) {
       .wrap { width: min(100% - 20px, 1220px); padding-top: 10px; }
@@ -401,8 +419,8 @@
       .panel { border-radius: 18px; }
       .panel-head,
       .panel-body,
-      .history-toolbar { padding: 14px; }
-      .pager { width: 100%; margin-left: 0; justify-content: space-between; }
+      .history-toolbar,
+      .history-pager { padding: 14px; }
     }
   </style>
 </head>
@@ -412,41 +430,25 @@
       <a class="github-link" href="https://github.com/SilverC0de/Polymarket-AI-bot-trader-by-Nothing" target="_blank" rel="noopener noreferrer">GitHub</a>
       <p class="eyebrow">Polymarket 02 / finance surface</p>
       <h1>Live trading telemetry with a clean event ledger.</h1>
-      <p class="sub">
-        A compact landing page for the simulator: current state from <kbd>/finance</kbd>,
-        plus paged persisted outcomes from <kbd>/finance/history/{page}</kbd>.
-      </p>
-      <div class="endpoint-row">
-        <span>synced</span>
-        <kbd id="clock">—</kbd>
-      </div>
     </header>
 
     <main class="layout">
-      <section class="stack" aria-label="Finance details">
-        <article class="panel">
-          <div class="panel-head"><span>Overview</span><span id="liveChip">…</span></div>
-          <div class="panel-body">
-            <div class="overview-copy" id="plainEnglish">Loading…</div>
-            <div class="kpi-grid" id="kpis"></div>
-          </div>
-        </article>
+      <article class="panel panel--performance" aria-label="Performance metrics">
+        <div class="panel-head"><span class="overview-head">Performance since <span id="performanceSince" class="overview-since-value">—</span></span></div>
+        <div class="panel-body">
+          <div class="receipt" id="performanceReceipt"></div>
+        </div>
+      </article>
 
-        <article class="panel">
-          <div class="panel-head"><span>Details</span><span class="hint">GET /finance</span></div>
-          <div class="panel-body">
-            <pre class="blk" id="liveBlock"></pre>
-          </div>
-        </article>
-
-        <article class="panel panel--performance" aria-label="Performance metrics">
-          <div class="panel-head"><span>Performance</span><span class="hint">stats + interpretation</span></div>
-          <div class="panel-body metric-columns">
-            <pre class="blk" id="statBlock"></pre>
-            <pre class="blk" id="aiBlock" style="color:var(--accent)"></pre>
-          </div>
-        </article>
-      </section>
+      <article class="panel">
+        <div class="panel-head">
+          <span class="overview-head">Details of ongoing 5m trade</span>
+          <span class="hint">GET /finance</span>
+        </div>
+        <div class="panel-body">
+          <div class="receipt" id="detailsReceipt"></div>
+        </div>
+      </article>
 
       <section class="panel historyPanel" aria-label="Finance history">
         <div class="panel-head">
@@ -457,18 +459,18 @@
           <div id="histSummary">Loading…</div>
           <div class="bar">
             <label><input type="checkbox" id="learnMode" /> include skips + pending</label>
-            <button type="button" id="reloadHist">Refresh</button>
-            <span class="pager">
-              <button type="button" id="prevP">⟨</button>
-              <span id="pageLabel">page 1</span>
-              <button type="button" id="nextP">⟩</button>
-            </span>
           </div>
         </div>
         <ul id="feed"></ul>
+        <div class="history-pager" role="navigation" aria-label="History pages">
+          <button type="button" id="prevP">⟨</button>
+          <span id="pageLabel">page 1</span>
+          <button type="button" id="nextP">⟩</button>
+        </div>
       </section>
     </main>
     <div id="toast"></div>
+    <footer id="feedStrip" class="feed-strip" role="status" aria-live="polite"></footer>
   </div>
 
   <script>
@@ -496,105 +498,163 @@
       return n.toFixed(dec);
     }
 
+    /** API may send win_rate as 0–100 (percent) or 0–1 (fraction); normalize for display */
+    function winRateAsPercent(raw) {
+      if (typeof raw !== "number" || Number.isNaN(raw)) return 0;
+      if (raw > 1) return raw;
+      return raw * 100;
+    }
+
+    function winRateAsFraction(raw) {
+      if (typeof raw !== "number" || Number.isNaN(raw)) return 0;
+      if (raw > 1) return raw / 100;
+      return raw;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function receiptRowText(label, value, { rowClass = "", valueClass = "" } = {}) {
+      const rc = rowClass ? ` ${rowClass}` : "";
+      const vc = valueClass ? ` ${valueClass}` : "";
+      return (
+        `<div class="receipt-row${rc}">` +
+        `<span class="receipt-k">${escapeHtml(label)}</span>` +
+        `<span class="receipt-v${vc}">${escapeHtml(String(value))}</span>` +
+        `</div>`
+      );
+    }
+
+    function fmtTrend(s) {
+      const t = String(s.trend ?? "").toUpperCase();
+      if (t === "UP") return "Up";
+      if (t === "DOWN") return "Down";
+      return "—";
+    }
+
+    function skipReasonTitles() {
+      return {
+        price_diff_too_small: "Price too close to target price",
+        price_diff_too_large: "Price too far from target price",
+        timing_too_early: "Too long until market end",
+        timing_too_late: "Too close to expiry",
+        sideways_market: "Sideways market",
+        trend_unclear: "Trend unclear",
+        swing_detected: "Swing detected",
+        no_liquidity: "No market liquidity",
+        already_resolved: "Market has ended",
+        weak_momentum: "Weak momentum",
+        overextended: "Overextended price movement",
+        dangerous_pattern: "Dangerous pattern",
+      };
+    }
+
+    function humanizeSkipCode(code) {
+      return String(code || "")
+        .split("_")
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+    }
+
+    function buildSkipReasonRows(sr) {
+      const raw = sr && typeof sr === "object" ? sr : {};
+      const entries = Object.entries(raw)
+        .map(([k, v]) => [k, typeof v === "number" ? v : Number(v)])
+        .filter(([, n]) => Number.isFinite(n) && n > 0)
+        .sort((a, b) => b[1] - a[1]);
+      if (!entries.length) {
+        return receiptRowText("Skip reasons", "—");
+      }
+      const titles = skipReasonTitles();
+      const items = entries
+        .map(([code, count]) => {
+          const title = titles[code] || humanizeSkipCode(code) || code;
+          const head = `${title} — ${count}×`;
+          return `<li class="skip-reason-item"><span class="skip-reason-head">${escapeHtml(head)}</span></li>`;
+        })
+        .join("");
+      return (
+        `<div class="receipt-row receipt-row--skips">` +
+        `<span class="receipt-k">Skip reasons</span>` +
+        `<div class="receipt-v receipt-v--skips"><ul class="skip-reason-list">${items}</ul></div>` +
+        `</div>`
+      );
+    }
+
+    function sessionUptimeLabel(uptime) {
+      const t = String(uptime ?? "").trim();
+      if (!t || t === "0s") return "—";
+      return t;
+    }
+
     function fmtStatus(s) {
-      const hl = $("liveChip");
-      const ok = !!(s.running && s.price_feed_healthy && s.ws_connected);
-      hl.innerHTML =
-        `<span style="color:${ok ? "var(--accent)" : "var(--err)"}">
-          ${ok ? "ONLINE" : "DEGRADED"}
-        </span>`;
       const warn = !(s.price_feed_healthy && s.ws_connected);
 
-      if ($("plainEnglish")) $("plainEnglish").textContent = buildPlainEnglish(s);
-      if ($("kpis")) renderKpis(s);
-
-      let block = "";
-      block += `Server time: ${escapeHtml(String(s.server_time || "—"))}\n`;
-      block += `Polymarket time: ${escapeHtml(String(s.polymarket_time || "—"))}\n`;
-      block += `Uptime: ${escapeHtml(String(s.uptime || "—"))}\n`;
-      block += `BTC price: ${fmtNum(s.current_btc_price, 2)}\n`;
-      block += `Target: ${s.target_price != null ? fmtNum(s.target_price, 2) : "—"}\n`;
-      block += `Difference: ${s.price_diff != null ? fmtNum(s.price_diff, 2) : "—"}\n`;
-      block += `Time to market end: ${escapeHtml(String(s.time_to_end || "—"))}\n`;
-      block += `Price feed: ${s.price_feed_healthy ? "healthy" : "stale/down"} (${fmtNum(s.price_age_seconds, 2)}s since last tick; ws=${s.ws_connected ? "connected" : "down"})`;
-      $("liveBlock").textContent = block;
+      const uptimeLbl = sessionUptimeLabel(s.uptime);
+      if ($("performanceSince")) $("performanceSince").textContent = uptimeLbl;
 
       const st = s.stats || {};
-      const sr = st.skip_reasons || {};
-      const skips = Object.keys(sr).length
-        ? Object.entries(sr).map(([k, v]) => `${k}:${v}`).join(" ")
-        : "none";
-      const statTxt =
-        `Trades: ${st.total_trades ?? 0} (wins ${st.wins ?? 0}, losses ${st.losses ?? 0}, pending ${st.pending ?? 0})\n` +
-        `Win rate: ${fmtNum((st.win_rate ?? 0) * 100, 2)}%\n` +
-        `Skipped markets: ${st.total_skipped ?? 0} (${skips})`;
-      $("statBlock").textContent = statTxt;
+      const wrPct = winRateAsPercent(st.win_rate);
+      const age = typeof s.price_age_seconds === "number" ? s.price_age_seconds : 0;
+      const feedOk = !!(s.price_feed_healthy && s.ws_connected);
+      const pendingN = st.pending ?? 0;
+      const pendingCls = pendingN > 0 ? "receipt-v--caution" : "";
 
-      const aiTxt = buildAIBrief(s);
-      $("aiBlock").textContent = aiTxt;
+      const btc =
+        typeof s.current_btc_price === "number" ? `$${fmtNum(s.current_btc_price, 2)}` : "—";
+      let det = "";
+      det += receiptRowText("Server time", String(s.server_time || "—"));
+      det += receiptRowText("Polymarket time", String(s.polymarket_time || "—"));
+      det += receiptRowText("Uptime", String(s.uptime || "—"));
+      det += receiptRowText("BTC spot", btc);
+      det += receiptRowText("Trend", fmtTrend(s));
+      det += receiptRowText("Target", s.target_price != null ? fmtNum(s.target_price, 2) : "—");
+      det += receiptRowText("Difference", s.price_diff != null ? fmtNum(s.price_diff, 2) : "—");
+      det += receiptRowText("Time to market end", String(s.time_to_end || "—"));
+      $("detailsReceipt").innerHTML = det;
+
+      const strip = $("feedStrip");
+      if (strip) {
+        const feedPart = `${fmtNum(age, 2)}s · ${s.price_feed_healthy ? "tick OK" : "stale"} · ws ${s.ws_connected ? "up" : "down"}`;
+        const vCls = !feedOk ? "receipt-v--bad" : age > 5 ? "receipt-v--caution" : "receipt-v--ok";
+        strip.innerHTML =
+          `<span class="feed-strip-k">Feed health</span> <span class="${vCls}">${escapeHtml(feedPart)}</span>`;
+      }
+
+      const sr = st.skip_reasons || {};
+      let perfR = "";
+      perfR += receiptRowText("Trades (logged)", String(st.total_trades ?? 0));
+      perfR += receiptRowText("Wins", String(st.wins ?? 0));
+      perfR += receiptRowText("Losses", String(st.losses ?? 0));
+      perfR += receiptRowText("Pending", String(st.pending ?? 0), { valueClass: pendingCls });
+      perfR += receiptRowText("Win rate", `${fmtNum(wrPct, 2)}%`, { rowClass: "receipt-row--highlight" });
+      perfR += receiptRowText("Skipped markets", String(st.total_skipped ?? 0));
+      perfR += buildSkipReasonRows(sr);
+      for (const [k, v] of buildInterpretationRows(s)) {
+        perfR += receiptRowText(k, v);
+      }
+      $("performanceReceipt").innerHTML = perfR;
 
       return warn ? "WARN" : "OK";
     }
 
-    function buildPlainEnglish(s) {
+    function buildInterpretationRows(s) {
       const st = s.stats || {};
-      const running = !!s.running;
+      const wrFrac = winRateAsFraction(st.win_rate);
       const feedOk = !!(s.price_feed_healthy && s.ws_connected);
-      const age = typeof s.price_age_seconds === "number" ? s.price_age_seconds : 0;
-      const price = typeof s.current_btc_price === "number" ? s.current_btc_price : null;
-      const wr = typeof st.win_rate === "number" ? st.win_rate : 0;
-      if (!running) return "Simulator is not running yet.";
-      if (!feedOk) return `Price feed looks unhealthy (${fmtNum(age, 2)}s since last update). New results may stall until the feed recovers.`;
-      const wrTxt = `${fmtNum(wr * 100, 1)}% win rate`;
-      const pTxt = price != null ? `BTC $${fmtNum(price, 2)}` : "BTC price unknown";
-      return `Running. Feed healthy. ${pTxt}. Overall performance is tracking at a ${wrTxt}.`;
-    }
-
-    function renderKpis(s) {
-      const st = s.stats || {};
-      const el = $("kpis");
-      if (!el) return;
-      const age = typeof s.price_age_seconds === "number" ? s.price_age_seconds : 0;
-      const feedOk = !!(s.price_feed_healthy && s.ws_connected);
-      const ageColor = !feedOk ? "var(--err)" : age > 5 ? "var(--warn)" : "var(--accent)";
-      const target = s.target_price != null ? fmtNum(s.target_price, 2) : "—";
-      const diff = s.price_diff != null ? fmtNum(s.price_diff, 2) : "—";
-      el.innerHTML = "";
-      el.appendChild(pill("Trades", String(st.total_trades ?? 0)));
-      el.appendChild(pill("Win rate", `${fmtNum((st.win_rate ?? 0) * 100, 1)}%`));
-      el.appendChild(pill("Pending", String(st.pending ?? 0), (st.pending ?? 0) > 0 ? "var(--warn)" : "var(--muted)"));
-      el.appendChild(pill("Feed age", `${fmtNum(age, 2)}s`, ageColor));
-      el.appendChild(pill("Target", target));
-      el.appendChild(pill("Δ", diff));
-    }
-
-    function pill(label, value, valueColor) {
-      const s = document.createElement("span");
-      s.className = "pill";
-      s.innerHTML = `${escapeHtml(label)} <b style="${valueColor ? `color:${valueColor}` : ""}">${escapeHtml(String(value))}</b>`;
-      return s;
-    }
-
-    function buildAIBrief(s) {
-      const st = s.stats || {};
-      const wr = typeof st.win_rate === "number" ? st.win_rate : 0;
-      const feedOk = !!(s.price_feed_healthy && s.ws_connected);
-      const running = !!s.running;
       const pending = st.pending ?? 0;
 
-      const mood =
-        !running ? "IDLE" :
-        !feedOk ? "SIGNAL LOST" :
-        wr >= 0.55 ? "EDGE POSITIVE" :
-        wr > 0 ? "EDGE WATCH" :
-        "EDGE UNKNOWN";
-
-      let out = "";
-      out += `Mode: ${mood}\n`;
-      out += `Confidence: ${feedOk ? (wr >= 0.55 ? "high" : wr >= 0.50 ? "medium" : "low") : "low"}\n`;
-      out += `What to watch: ${pending > 0 ? `${pending} trade(s) still pending resolution` : "no pending trades"}\n`;
-      out += `Suggestion: ${feedOk ? "monitor win-rate and pending resolution" : "fix feed/websocket first (results will stall)"}\n`;
-      return out;
+      const conf = feedOk ? (wrFrac >= 0.55 ? "high" : wrFrac >= 0.50 ? "medium" : "low") : "low";
+      const watch = pending > 0 ? `${pending} trade(s) still pending resolution` : "no pending trades";
+      return [
+        ["Confidence", conf],
+        ["What to watch", watch],
+      ];
     }
 
     function shortenData(kind, data) {
@@ -622,13 +682,6 @@
         }
       } catch (_) {}
       return "{}";
-    }
-
-    function escapeHtml(str) {
-      return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
     }
 
     async function refreshStatus() {
@@ -815,10 +868,6 @@
       renderHistory(h);
     }
 
-    function tickClock() {
-      $("clock").textContent = new Date().toISOString();
-    }
-
     async function pulseLive() {
       try {
         await refreshStatus();
@@ -836,9 +885,6 @@
       }
     }
 
-    $("reloadHist").addEventListener("click", () => {
-      pulse();
-    });
     $("prevP").addEventListener("click", () => {
       if (historyPage > 1) {
         historyPage--;
@@ -855,8 +901,6 @@
       refreshHistory().catch((e) => showToast(String(e.message)));
     });
 
-    tickClock();
-    setInterval(tickClock, 1000);
     pulse().catch(() => {});
     setInterval(() => pulseLive().catch(() => {}), 3000);
   </script>
