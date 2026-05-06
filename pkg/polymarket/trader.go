@@ -431,8 +431,15 @@ func (t *Trader) l2AuthHeaders(method, path, body string) map[string]string {
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	sig := buildL2Signature(t.config.APISecret, ts, method, path, body)
 
+	// For POLY_PROXY and GNOSIS_SAFE signature types, API keys are registered
+	// under the proxy wallet address (funder), not the EOA signer address.
+	polyAddress := t.eoaAddress.Hex()
+	if t.config.SignatureType == SigTypePolyProxy || t.config.SignatureType == SigTypeGnosisSafe {
+		polyAddress = t.config.ProxyWallet
+	}
+
 	return map[string]string{
-		"POLY_ADDRESS":    t.eoaAddress.Hex(),
+		"POLY_ADDRESS":    polyAddress,
 		"POLY_SIGNATURE":  sig,
 		"POLY_TIMESTAMP":  ts,
 		"POLY_API_KEY":    t.config.APIKey,
