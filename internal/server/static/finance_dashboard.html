@@ -529,10 +529,12 @@
       );
     }
 
-    function fmtTrend(s) {
-      const t = String(s.trend ?? "").toUpperCase();
-      if (t === "UP") return "Up";
-      if (t === "DOWN") return "Down";
+    /** Details panel: Trend from spot − target (same as Difference). */
+    function fmtDetailsTrendFromDiff(s) {
+      const d = s.price_diff;
+      if (typeof d !== "number" || Number.isNaN(d)) return "—";
+      if (d > 0) return "Up";
+      if (d < 0) return "Down";
       return "—";
     }
 
@@ -612,9 +614,9 @@
       det += receiptRowText("Polymarket time", String(s.polymarket_time || "—"));
       det += receiptRowText("Uptime", String(s.uptime || "—"));
       det += receiptRowText("BTC spot", btc);
-      det += receiptRowText("Trend", fmtTrend(s));
       det += receiptRowText("Target", s.target_price != null ? fmtNum(s.target_price, 2) : "—");
       det += receiptRowText("Difference", s.price_diff != null ? fmtNum(s.price_diff, 2) : "—");
+      det += receiptRowText("Trend", fmtDetailsTrendFromDiff(s));
       det += receiptRowText("Time to market end", String(s.time_to_end || "—"));
       $("detailsReceipt").innerHTML = det;
 
