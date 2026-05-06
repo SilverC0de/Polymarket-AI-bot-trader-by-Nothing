@@ -137,6 +137,7 @@ func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *Sim
 		cfg := polymarket.TraderConfig{
 			PrivateKeyHex: os.Getenv("POLYMARKET_PRIVATE_KEY"),
 			ProxyWallet:   os.Getenv("POLYMARKET_PROXY_WALLET"),
+			DepositWallet: os.Getenv("POLYMARKET_DEPOSIT_WALLET"),
 			APIKey:        os.Getenv("POLYMARKET_API_KEY"),
 			APISecret:     os.Getenv("POLYMARKET_API_SECRET"),
 			APIPassphrase: os.Getenv("POLYMARKET_API_PASSPHRASE"),

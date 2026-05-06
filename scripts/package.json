@@ -9,9 +9,11 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
-    "@polymarket/clob-client-v2": "^1.0.2",
+    "@polymarket/builder-relayer-client": "0.0.9",
+    "@polymarket/builder-signing-sdk": "latest",
+    "@polymarket/clob-client-v2": "1.0.3-canary.0",
     "viem": "^2.48.8"
   }
 }
