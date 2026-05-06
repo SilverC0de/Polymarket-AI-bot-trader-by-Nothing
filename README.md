@@ -60,42 +60,54 @@ cp .env.example .env
 
 Open `.env` and fill in the values described below.
 
-### 2. Generate CLOB API credentials from your private key
+### 2. Generate CLOB API credentials (`scripts/gen-api-keys.mjs`)
 
-Polymarket's CLOB API requires three credentials (`API_KEY`, `API_SECRET`, `API_PASSPHRASE`) derived from your **EOA private key**. Run the generation script once to produce them:
+Polymarket’s CLOB expects three values in `.env`: `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, and `POLYMARKET_API_PASSPHRASE`. You generate them once from your **EOA private key** (the key that signs orders). Install script dependencies first:
 
 ```bash
 cd scripts
 npm install
 cd ..
+```
 
+How you run the script depends on **how you use Polymarket**:
+
+| Account style | `POLYMARKET_SIG_TYPE` | When generating keys | `POLYMARKET_PROXY_WALLET` in `.env` |
+|---------------|-------------------------|----------------------|-------------------------------------|
+| **Email / Magic / Google** (Polymarket “social” login) | `1` (POLY_PROXY) | Pass **proxy wallet + sig type** so the key is registered for your deposit/proxy address | Profile address where your balance lives (`polymarket.com/profile`) |
+| **Browser wallet** linked to Polymarket (MetaMask, Rabby, etc.) | `2` (GNOSIS_SAFE) | Same as above: **proxy wallet + sig type** | Same — the proxy shown on your profile |
+| **Standalone EOA** (you trade from the same address as your signing key, no Polymarket proxy) | `0` (EOA) | Private key only — **do not** set `POLYMARKET_PROXY_WALLET` or `POLYMARKET_SIG_TYPE` for the script | Set to your **EOA address** (the `0x…` derived from `POLYMARKET_PRIVATE_KEY`; it must match the maker the API expects) |
+
+**Typical Polymarket.com users (email or browser wallet)** — register the API key against your **proxy (funder)** address so it lines up with live trading:
+
+```bash
+POLYMARKET_PRIVATE_KEY=0x<your-64-hex-private-key> \
+POLYMARKET_PROXY_WALLET=0x<proxy-from-profile> \
+POLYMARKET_SIG_TYPE=1 \
+node scripts/gen-api-keys.mjs
+```
+
+Use `POLYMARKET_SIG_TYPE=2` instead of `1` if you use a browser wallet as in the table above.
+
+**Pure EOA path** (advanced; only if your Polymarket setup is non-proxy):
+
+```bash
 POLYMARKET_PRIVATE_KEY=0x<your-64-hex-private-key> node scripts/gen-api-keys.mjs
 ```
 
-The script will print three values:
+The script prints three lines to paste into `.env` (replace any previous API credentials if you switched accounts or regenerated keys).
 
-```
-POLYMARKET_API_KEY=...
-POLYMARKET_API_SECRET=...
-POLYMARKET_API_PASSPHRASE=...
-```
+> **Security:** Your private key never leaves your machine — the script signs Polymarket’s credential-derivation flow locally and only prints the derived API key, secret, and passphrase. Do **not** commit `.env` or paste real keys into the README, issues, or chat logs.
 
-Copy these into your `.env` file.
+**Consistency checklist**
 
-> **Security:** Your private key never leaves your machine — the script signs a local credential-derivation request and only outputs the derived API credentials.
+- **`POLYMARKET_SIG_TYPE` in `.env`** must match how you signed up (see table). The live trader sends L2 auth using your **EOA** for type `0`, and your **proxy wallet address** for types `1` and `2`, which must match how the API key was registered when you ran the script.
+- After **creating a new Polymarket account** or changing login method, regenerate API credentials and update all three `POLYMARKET_API_*` variables. Old keys are tied to the previous registration.
+- If orders fail with **maker address not allowed** or **deposit wallet** messaging, you usually have a mismatch: proxy wallet / signature type / API key registration / or `POLYMARKET_PRIVATE_KEY` from a different wallet than the one tied to that Polymarket account.
 
-### 3. Set your proxy wallet
+### 3. Set proxy wallet and signature type in `.env`
 
-Your `POLYMARKET_PROXY_WALLET` is the address shown on your Polymarket profile page (the on-chain proxy that holds your funds). Add it to `.env`.
-
-### 4. Set the signature type
-
-| Value | When to use |
-|-------|------------|
-| `1` | POLY_PROXY — Magic, email, or Google login |
-| `2` | GNOSIS_SAFE — Browser wallet (MetaMask, etc.) |
-
-Set `POLYMARKET_SIG_TYPE` accordingly in `.env`.
+Fill `POLYMARKET_PROXY_WALLET` from your profile when you use signature types `1` or `2`. For type `0`, set it to your EOA address as in the table. Set `POLYMARKET_SIG_TYPE` to `0`, `1`, or `2` to match your account.
 
 ---
 
@@ -109,8 +121,8 @@ Set `POLYMARKET_SIG_TYPE` accordingly in `.env`.
 | `POLYMARKET_API_KEY` | Live trading | CLOB API key (from `gen-api-keys.mjs`) |
 | `POLYMARKET_API_SECRET` | Live trading | CLOB API secret (from `gen-api-keys.mjs`) |
 | `POLYMARKET_API_PASSPHRASE` | Live trading | CLOB API passphrase (from `gen-api-keys.mjs`) |
-| `POLYMARKET_PROXY_WALLET` | Live trading | On-chain proxy wallet address (`0x…`) |
-| `POLYMARKET_SIG_TYPE` | Live trading | `1` = POLY_PROXY, `2` = GNOSIS_SAFE |
+| `POLYMARKET_PROXY_WALLET` | Live trading | Proxy wallet from profile (`0x…`) for types `1`–`2`; for type `0`, use your EOA address (same as the address of `POLYMARKET_PRIVATE_KEY`). |
+| `POLYMARKET_SIG_TYPE` | Live trading | `0` = EOA (standalone signer). `1` = POLY_PROXY (email / Magic / Google). `2` = GNOSIS_SAFE (browser wallet proxy). Must match how you generated API keys and how you use Polymarket. |
 | `REDIS_URL` | No | Redis connection string. If empty, event log is in-memory only. |
 
 ---
