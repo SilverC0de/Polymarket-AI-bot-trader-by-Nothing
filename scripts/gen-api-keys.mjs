@@ -51,7 +51,7 @@ if (SIG_TYPE === 3) {
     console.error("Run setup-deposit-wallet.mjs first to deploy your deposit wallet.");
     process.exit(1);
   }
-  console.log(`Registering API key for deposit wallet (POLY_1271): ${DEPOSIT_WALLET}`);
+  console.log(`Configuring deposit wallet funder (POLY_1271): ${DEPOSIT_WALLET}`);
   clientConfig.funderAddress = DEPOSIT_WALLET;
   clientConfig.signatureType = SignatureTypeV2.POLY_1271;
 } else if (PROXY_WALLET && (SIG_TYPE === 1 || SIG_TYPE === 2)) {
@@ -78,7 +78,7 @@ console.log(`POLYMARKET_API_SECRET=${creds.secret}`);
 console.log(`POLYMARKET_API_PASSPHRASE=${creds.passphrase}`);
 console.log("\n============================================");
 if (SIG_TYPE === 3) {
-  console.log(`\nAPI key registered for deposit wallet: ${DEPOSIT_WALLET}`);
+  console.log(`\nDeposit wallet funder: ${DEPOSIT_WALLET}`);
 } else if (PROXY_WALLET) {
   console.log(`\nAPI key registered for proxy wallet: ${PROXY_WALLET}`);
 }

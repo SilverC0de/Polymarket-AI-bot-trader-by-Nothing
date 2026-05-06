@@ -527,16 +527,14 @@ func (t *Trader) l2AuthHeaders(method, path, body string) map[string]string {
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	sig := buildL2Signature(t.config.APISecret, ts, method, path, body)
 
-	// POLY_ADDRESS must match the address the API key was registered under.
-	// POLY_PROXY/GNOSIS_SAFE: registered under the proxy wallet.
-	// POLY_1271: registered under the deposit wallet.
-	// EOA: registered under the EOA address itself.
+	// POLY_ADDRESS is the Polygon signer address used to create/derive the API key.
+	// This mirrors @polymarket/clob-client-v2's createL2Headers behavior. For
+	// POLY_1271, the order maker/signer is still the deposit wallet, but L2 auth
+	// remains tied to the EOA that owns/signs for that deposit wallet.
 	polyAddress := t.eoaAddress.Hex()
 	switch t.config.SignatureType {
 	case SigTypePolyProxy, SigTypeGnosisSafe:
 		polyAddress = t.config.ProxyWallet
-	case SigTypePoly1271:
-		polyAddress = t.config.DepositWallet
 	}
 
 	return map[string]string{
