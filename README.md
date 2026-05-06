@@ -159,7 +159,7 @@ POLYMARKET_PRIVATE_KEY=0x<your-64-hex-private-key> node scripts/gen-api-keys.mjs
 | `POLYMARKET_PROXY_WALLET` | Live trading when **not** type `3` | Proxy / funder from profile for types `1`–`2`; for type `0`, your EOA address. Ignored for order placement when using type `3` (deposit wallet replaces maker/signer). |
 | `REDIS_URL` | No | Redis connection string. If empty, event log is in-memory only. |
 
-The Go application does **not** read `RELAYER_*` variables; any relayer keys in `.env` are for your own scripts or tooling.
+The Go application does **not** need any relayer credentials — the relayer is only used via `setup-deposit-wallet.mjs` (a one-time setup script), which reads `POLYMARKET_API_KEY/SECRET/PASSPHRASE` directly.
 
 ---
 
