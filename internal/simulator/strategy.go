@@ -24,6 +24,7 @@ const (
 	SkipOverextended      SkipReason = "overextended"         // price moved too fast, likely to reverse
 	SkipDangerousPattern  SkipReason = "dangerous_pattern"    // combination of small cushion, bad position, and pullback
 	SkipApproachingTarget SkipReason = "approaching_target"   // price retreated toward target from its 60s extreme
+	SkipNetAdverseMove    SkipReason = "net_adverse_move"     // price net moved against the trade direction over the lookback window
 )
 
 // Direction represents the predicted market direction.
@@ -81,6 +82,8 @@ type StrategyConfig struct {
 	DangerPullbackPercent float64 // Max pullback as % of cushion (45%)
 	// Approach-from-extreme filter
 	MaxExtremeApproach float64 // Max $ the price may have retreated toward target from its 60s extreme
+	// Net adverse move filter
+	MinAdverseNetMove float64 // Skip if price net moved this many $ against the trade direction over the lookback window
 }
 
 // DefaultStrategyConfig returns the default configuration based on user requirements.
@@ -108,6 +111,8 @@ func DefaultStrategyConfig() StrategyConfig {
 		DangerPullbackPercent: 45.0, // Pullback must be > 45% of cushion to be risky
 		// Approach-from-extreme filter
 		MaxExtremeApproach: 20.0, // Skip if price retreated >$20 toward target from its 60s extreme
+		// Net adverse move filter
+		MinAdverseNetMove: 5.0, // Skip if price net moved >$5 against the trade direction over 60s
 	}
 }
 
@@ -230,6 +235,17 @@ func (s *Strategy) EvaluateEntry(state *MarketState, currentPrice float64, now t
 		return DirectionNone, SkipApproachingTarget, fmt.Sprintf(
 			"price retreated $%.2f toward target from its 60s extreme (max $%.0f allowed)",
 			extremeApproach, s.config.MaxExtremeApproach,
+		)
+	}
+
+	// Check net adverse move — skip if the price net moved against the trade direction
+	// over the lookback window. Catches flat/drifting markets where the micro-trend
+	// points the right way but the broader 60s move is against the bet (Trade #100: +$17 UP on a DOWN trade).
+	adverseMove := s.calculateAdverseNetMove(state.PriceHistory, trend)
+	if adverseMove > s.config.MinAdverseNetMove {
+		return DirectionNone, SkipNetAdverseMove, fmt.Sprintf(
+			"price net moved $%.2f against %s trade over lookback (max $%.0f allowed)",
+			adverseMove, trend, s.config.MinAdverseNetMove,
 		)
 	}
 
@@ -461,6 +477,43 @@ func (s *Strategy) calculateApproachFromExtreme(history []PriceSnapshot, priceTo
 		}
 	}
 	return maxDist - currentDist
+}
+
+// calculateAdverseNetMove returns how far the price net moved AGAINST the trade
+// direction over the lookback window (start-to-end). A positive return means the
+// price drifted the wrong way; zero means it moved in the trade direction or was flat.
+func (s *Strategy) calculateAdverseNetMove(history []PriceSnapshot, direction Direction) float64 {
+	if len(history) < 2 {
+		return 0
+	}
+
+	now := history[len(history)-1].Timestamp
+	cutoff := now.Add(-s.config.RecentMoveLookback)
+
+	startPrice := history[0].BTCPrice
+	for _, snap := range history {
+		if snap.Timestamp.After(cutoff) || snap.Timestamp.Equal(cutoff) {
+			startPrice = snap.BTCPrice
+			break
+		}
+	}
+
+	endPrice := history[len(history)-1].BTCPrice
+	netMove := endPrice - startPrice // positive = price went UP
+
+	switch direction {
+	case DirectionDown:
+		// For DOWN trade, UP movement is adverse
+		if netMove > 0 {
+			return netMove
+		}
+	case DirectionUp:
+		// For UP trade, DOWN movement is adverse
+		if netMove < 0 {
+			return -netMove
+		}
+	}
+	return 0
 }
 
 // RecordPrice adds a price snapshot to the market state.
