@@ -23,6 +23,7 @@ const (
 	SkipWeakMomentum      SkipReason = "weak_momentum"        // price not moving away from target fast enough
 	SkipOverextended      SkipReason = "overextended"         // price moved too fast, likely to reverse
 	SkipDangerousPattern  SkipReason = "dangerous_pattern"    // combination of small cushion, bad position, and pullback
+	SkipApproachingTarget SkipReason = "approaching_target"   // price retreated toward target from its 60s extreme
 )
 
 // Direction represents the predicted market direction.
@@ -78,6 +79,8 @@ type StrategyConfig struct {
 	DangerCushionLimit    float64 // Max cushion to be considered "small" ($60)
 	DangerPositionLimit   float64 // Min position in range to avoid being "bad" (0.35 = 35%)
 	DangerPullbackPercent float64 // Max pullback as % of cushion (45%)
+	// Approach-from-extreme filter
+	MaxExtremeApproach float64 // Max $ the price may have retreated toward target from its 60s extreme
 }
 
 // DefaultStrategyConfig returns the default configuration based on user requirements.
@@ -103,6 +106,8 @@ func DefaultStrategyConfig() StrategyConfig {
 		DangerCushionLimit:    70.0, // Cushion must be < $70 to be risky
 		DangerPositionLimit:   0.35, // Position must be < 35% to be risky
 		DangerPullbackPercent: 45.0, // Pullback must be > 45% of cushion to be risky
+		// Approach-from-extreme filter
+		MaxExtremeApproach: 20.0, // Skip if price retreated >$20 toward target from its 60s extreme
 	}
 }
 
@@ -215,6 +220,17 @@ func (s *Strategy) EvaluateEntry(state *MarketState, currentPrice float64, now t
 	// Check for dangerous entry pattern - only reject if ALL three conditions are met
 	if hasDangerousPattern := s.checkDangerousPattern(state.PriceHistory, currentPrice, state.PriceToBeat, absDiff, trend); hasDangerousPattern {
 		return DirectionNone, SkipDangerousPattern, "small cushion + bad entry position + significant pullback"
+	}
+
+	// Check approach from extreme — skip if price has retreated too far toward target
+	// from its most distant point in the 60s window. Catches slow sustained approaches
+	// (Trade #37: $83 retreat) and sharp bounce reversals (Trade #73: $22 retreat).
+	extremeApproach := s.calculateApproachFromExtreme(state.PriceHistory, state.PriceToBeat, absDiff)
+	if extremeApproach > s.config.MaxExtremeApproach {
+		return DirectionNone, SkipApproachingTarget, fmt.Sprintf(
+			"price retreated $%.2f toward target from its 60s extreme (max $%.0f allowed)",
+			extremeApproach, s.config.MaxExtremeApproach,
+		)
 	}
 
 	// All checks passed - enter trade following the trend
@@ -428,6 +444,23 @@ func (s *Strategy) HasSwung(history []PriceSnapshot, priceToBeat float64) bool {
 
 	// More than 1 crossing = swing detected
 	return crossings > 1
+}
+
+// calculateApproachFromExtreme returns how far the price has retreated toward the
+// target from its most distant (safest) point within the lookback window.
+// A large value means the price was safely far from the target but has since
+// come back toward it — a reversal signal regardless of the net direction.
+func (s *Strategy) calculateApproachFromExtreme(history []PriceSnapshot, priceToBeat, currentDist float64) float64 {
+	if len(history) < 2 {
+		return 0
+	}
+	maxDist := currentDist
+	for _, snap := range history {
+		if d := math.Abs(snap.BTCPrice - priceToBeat); d > maxDist {
+			maxDist = d
+		}
+	}
+	return maxDist - currentDist
 }
 
 // RecordPrice adds a price snapshot to the market state.
