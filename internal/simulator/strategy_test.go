@@ -71,3 +71,28 @@ func TestDefaultStrategyAllowsStrongCushionWithTrend(t *testing.T) {
 		t.Fatalf("EvaluateEntry() = (%s, %s), want (%s, %s)", gotDir, gotSkip, DirectionUp, SkipNone)
 	}
 }
+
+func TestDangerousPatternTriggersAtSeventyTwoDollarCushion(t *testing.T) {
+	strategy := NewStrategy(DefaultStrategyConfig())
+
+	history := []PriceSnapshot{
+		{BTCPrice: 76360},
+		{BTCPrice: 76420},
+		{BTCPrice: 76510},
+		{BTCPrice: 76600},
+		{BTCPrice: 76530},
+		{BTCPrice: 76480},
+		{BTCPrice: 76430},
+		{BTCPrice: 76400},
+		{BTCPrice: 76390},
+		{BTCPrice: 76384.5},
+	}
+
+	currentPrice := 76384.5
+	priceToBeat := 76312.59
+	cushion := currentPrice - priceToBeat // ~71.91
+
+	if !strategy.checkDangerousPattern(history, currentPrice, priceToBeat, cushion, DirectionUp) {
+		t.Fatalf("checkDangerousPattern() = false, want true for ~72 cushion + weak range position + pullback")
+	}
+}

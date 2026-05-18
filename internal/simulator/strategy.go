@@ -106,7 +106,7 @@ func DefaultStrategyConfig() StrategyConfig {
 		LargeCushionThreshold: 70.0, // Cushions >= $70 get relaxed momentum check
 		LargeCushionMomentum:  0.15, // Only need $0.15/sec momentum with large cushion
 		// Dangerous pattern filter (all 3 must be true to reject)
-		DangerCushionLimit:    70.0, // Cushion must be < $70 to be risky
+		DangerCushionLimit:    80.0, // Cushions below $80 are treated as potentially risky
 		DangerPositionLimit:   0.35, // Position must be < 35% to be risky
 		DangerPullbackPercent: 45.0, // Pullback must be > 45% of cushion to be risky
 		// Approach-from-extreme filter
