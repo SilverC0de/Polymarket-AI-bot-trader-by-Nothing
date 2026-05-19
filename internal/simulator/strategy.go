@@ -63,7 +63,7 @@ type MarketState struct {
 	ExperimentalLastOBCheck  time.Time
 	ExperimentalAvgPriceOK   bool
 }
-˝
+
 // ExperimentalConfig holds late-window spike-entry parameters.
 type ExperimentalConfig struct {
 	Window             time.Duration // Late entry window before market end
