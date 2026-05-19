@@ -145,7 +145,7 @@ func DefaultStrategyConfig() StrategyConfig {
 		MinAdverseNetMove: 5.0, // Skip if price net moved >$5 against the trade direction over 60s
 		Experimental: ExperimentalConfig{
 			Window:             30 * time.Second,
-			TradeSize:          2.0,
+			TradeSize:          4.0,
 			OrderbookCheckFreq: 1 * time.Second,
 			TriggerA: ExperimentalTriggerConfig{
 				DualFeedDiff:       40.0,
