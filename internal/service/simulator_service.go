@@ -80,8 +80,6 @@ type SimulatorService struct {
 	liveOrderTokens map[string]struct{}
 
 	eventLog store.EventRecorder
-	// Last persisted experimental debug signature per market (for dedupe).
-	experimentalDebugLast map[string]string
 }
 
 // LogEntry represents a log message.
@@ -157,15 +155,14 @@ func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *Sim
 	engine := simulator.NewEngine(strategy, client) // Pass client for real order book prices
 
 	s := &SimulatorService{
-		client:                client,
-		engine:                engine,
-		discoverer:            simulator.NewMarketDiscoverer(client),
-		logger:                logger,
-		startTime:             time.Now(),
-		logs:                  make([]LogEntry, 0),
-		liveOrderTokens:       make(map[string]struct{}),
-		eventLog:              eventLog,
-		experimentalDebugLast: make(map[string]string),
+		client:          client,
+		engine:          engine,
+		discoverer:      simulator.NewMarketDiscoverer(client),
+		logger:          logger,
+		startTime:       time.Now(),
+		logs:            make([]LogEntry, 0),
+		liveOrderTokens: make(map[string]struct{}),
+		eventLog:        eventLog,
 	}
 
 	// Wire up live trading if LIVE_TRADING=true and all credentials are present.
@@ -265,6 +262,9 @@ func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *Sim
 		if trade.Outcome == simulator.OutcomePending {
 			s.addLog("INFO", fmt.Sprintf("TRADE ENTERED #%d: %s @ $%.2f, target $%.2f",
 				trade.ID, trade.Direction, trade.EntryBTCPrice, trade.PriceToBeat))
+			if trade.StrategyLabel == "experimental" {
+				s.persistExperimentalEntry(trade)
+			}
 		} else {
 			s.addLog("INFO", fmt.Sprintf("TRADE RESOLVED #%d: %s, PnL: $%.2f",
 				trade.ID, trade.Outcome, trade.PnL))
@@ -312,46 +312,39 @@ func (s *SimulatorService) persistEvent(kind string, data any) {
 	}
 }
 
-func (s *SimulatorService) captureExperimentalHistory(polymarketPrice, coinbasePrice float64, ts time.Time) {
-	rows := s.engine.GetExperimentalDebug(polymarketPrice, coinbasePrice, ts)
-	if len(rows) == 0 {
-		s.mu.Lock()
-		s.experimentalDebugLast = make(map[string]string)
-		s.mu.Unlock()
+func (s *SimulatorService) persistExperimentalEntry(trade simulator.SimulatedTrade) {
+	s.mu.RLock()
+	pmPrice := s.currentPrice
+	coinbasePrice := s.coinbasePrice
+	s.mu.RUnlock()
+
+	rows := s.engine.GetExperimentalDebug(pmPrice, coinbasePrice, trade.EntryTime)
+	for _, row := range rows {
+		if row.MarketID != trade.MarketID {
+			continue
+		}
+		s.persistEvent("experimental", ExperimentalDebugEvent{
+			Timestamp: trade.EntryTime.UTC(),
+			MarketID:  trade.MarketID,
+			State:     row,
+		})
 		return
 	}
 
-	next := make(map[string]string, len(rows))
-	toPersist := make([]ExperimentalDebugEvent, 0, len(rows))
-
-	s.mu.Lock()
-	for _, row := range rows {
-		sig := fmt.Sprintf("%s|%t|%t|%t|%t|%t|%t|%s|%.2f",
-			row.BlockedReason,
-			row.WithinLast30s,
-			row.DualFeed30Qualified,
-			row.SameDirection,
-			row.AvgPriceQualified,
-			row.Armed,
-			row.SpikeQualified,
-			row.Direction,
-			row.SpikeFromBase,
-		)
-		next[row.MarketID] = sig
-		if s.experimentalDebugLast[row.MarketID] != sig {
-			toPersist = append(toPersist, ExperimentalDebugEvent{
-				Timestamp: ts.UTC(),
-				MarketID:  row.MarketID,
-				State:     row,
-			})
-		}
-	}
-	s.experimentalDebugLast = next
-	s.mu.Unlock()
-
-	for _, ev := range toPersist {
-		s.persistEvent("experimental", ev)
-	}
+	// Fallback when no debug row is available at callback time.
+	s.persistEvent("experimental", ExperimentalDebugEvent{
+		Timestamp: trade.EntryTime.UTC(),
+		MarketID:  trade.MarketID,
+		State: simulator.ExperimentalMarketDebug{
+			MarketID:        trade.MarketID,
+			TimeToEnd:       trade.MarketEndTime.Sub(trade.EntryTime).Round(time.Second).String(),
+			PriceToBeat:     trade.PriceToBeat,
+			PolymarketPrice: pmPrice,
+			CoinbasePrice:   coinbasePrice,
+			Direction:       trade.Direction,
+			EnteredTrade:    true,
+		},
+	})
 }
 
 func (s *SimulatorService) addLog(level, message string) {
@@ -410,7 +403,6 @@ func (s *SimulatorService) Start(ctx context.Context) error {
 		pmPrice := s.currentPrice
 		s.mu.Unlock()
 		s.engine.ProcessCoinbaseUpdate(price.Value, pmPrice, price.Timestamp)
-		s.captureExperimentalHistory(pmPrice, price.Value, price.Timestamp)
 	}, s.logger)
 
 	if err := s.coinbaseClient.Connect(ctx); err != nil {
