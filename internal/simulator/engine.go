@@ -23,7 +23,7 @@ const (
 	ExperimentalWindow = 30 * time.Second
 	ExperimentalDiff   = 30.0
 	ExperimentalSpike  = 5.0
-	ExperimentalMinAvg = 0.98
+	ExperimentalMinAvg = 0.96
 	ExperimentalSize   = 1.0
 )
 
