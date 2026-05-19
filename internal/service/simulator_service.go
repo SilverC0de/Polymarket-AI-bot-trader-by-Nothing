@@ -127,8 +127,8 @@ type SimulatorStatus struct {
 	PersistedTotal int64 `json:"persisted_total,omitempty"`
 	// PersistedEvents is filled when the client passes history_limit on GET /finance.
 	PersistedEvents []store.PersistedEvent `json:"persisted_events,omitempty"`
-	// ExperimentalHistory is a temporary inline audit trail for experimental decisions (newest first).
-	ExperimentalHistory []ExperimentalDebugEvent `json:"experimental_history,omitempty"`
+	// ExperimentalHistory includes only losing experimental trades (newest first).
+	ExperimentalHistory []simulator.SimulatedTrade `json:"experimental_history,omitempty"`
 }
 
 // SimStats contains simulation statistics.
@@ -661,27 +661,30 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 
 	if s.eventLog != nil {
 		if evs, err := s.eventLog.ListRecent(ctx, MaxExperimentalHistoryOnFinance); err == nil {
-			status.ExperimentalHistory = filterExperimentalEvents(evs)
+			status.ExperimentalHistory = filterExperimentalLosingTrades(evs)
 		}
 	}
 
 	return status
 }
 
-func filterExperimentalEvents(events []store.PersistedEvent) []ExperimentalDebugEvent {
+func filterExperimentalLosingTrades(events []store.PersistedEvent) []simulator.SimulatedTrade {
 	if len(events) == 0 {
 		return nil
 	}
-	out := make([]ExperimentalDebugEvent, 0, len(events))
+	out := make([]simulator.SimulatedTrade, 0, len(events))
 	for i := range events {
-		if events[i].Kind != "experimental" {
+		if events[i].Kind != "trade" {
 			continue
 		}
-		var ev ExperimentalDebugEvent
-		if err := json.Unmarshal(events[i].Data, &ev); err != nil {
+		var trade simulator.SimulatedTrade
+		if err := json.Unmarshal(events[i].Data, &trade); err != nil {
 			continue
 		}
-		out = append(out, ev)
+		if trade.StrategyLabel != "experimental" || trade.Outcome != simulator.OutcomeLose {
+			continue
+		}
+		out = append(out, trade)
 	}
 	return out
 }
