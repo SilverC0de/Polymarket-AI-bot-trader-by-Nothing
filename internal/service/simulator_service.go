@@ -112,12 +112,13 @@ type SimulatorStatus struct {
 	WSConnected      bool    `json:"ws_connected"`
 	// WarmingUp is true until the next full 5-minute window after startup, when
 	// market discovery is intentionally idle so the price feed can capture a boundary.
-	WarmingUp          bool                       `json:"warming_up,omitempty"`
-	MarketsReadyAt     string                     `json:"markets_ready_at,omitempty"`      // RFC3339 UTC
-	TimeToMarketsReady string                     `json:"time_to_markets_ready,omitempty"` // countdown while warming up
-	Stats              SimStats                   `json:"stats"`
-	Trades             []simulator.SimulatedTrade `json:"trades"`
-	Outcomes           []simulator.MarketOutcome  `json:"market_outcomes"`
+	WarmingUp          bool                                `json:"warming_up,omitempty"`
+	MarketsReadyAt     string                              `json:"markets_ready_at,omitempty"`      // RFC3339 UTC
+	TimeToMarketsReady string                              `json:"time_to_markets_ready,omitempty"` // countdown while warming up
+	Stats              SimStats                            `json:"stats"`
+	Trades             []simulator.SimulatedTrade          `json:"trades"`
+	Outcomes           []simulator.MarketOutcome           `json:"market_outcomes"`
+	ExperimentalDebug  []simulator.ExperimentalMarketDebug `json:"experimental_debug,omitempty"`
 
 	// PersistedTotal is the in-memory event count (each append is also logged to stdout).
 	PersistedTotal int64 `json:"persisted_total,omitempty"`
@@ -561,8 +562,9 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 			WinRate:      stats.WinRate,
 			SkipReasons:  make(map[string]int),
 		},
-		Trades:   s.engine.GetTrades(),
-		Outcomes: s.engine.GetMarketOutcomes(),
+		Trades:            s.engine.GetTrades(),
+		Outcomes:          s.engine.GetMarketOutcomes(),
+		ExperimentalDebug: s.engine.GetExperimentalDebug(currentPrice, coinbasePrice, now),
 	}
 
 	for reason, count := range stats.SkipReasons {

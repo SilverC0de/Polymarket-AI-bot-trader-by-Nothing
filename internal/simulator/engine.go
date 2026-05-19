@@ -79,6 +79,31 @@ type SimulationStats struct {
 	SkipReasons          map[SkipReason]int
 }
 
+// ExperimentalMarketDebug exposes per-market diagnostics for the experimental strategy.
+type ExperimentalMarketDebug struct {
+	MarketID            string     `json:"market_id"`
+	TimeToEnd           string     `json:"time_to_end"`
+	PriceToBeat         float64    `json:"price_to_beat"`
+	PolymarketPrice     float64    `json:"polymarket_price"`
+	CoinbasePrice       float64    `json:"coinbase_price"`
+	PolymarketDiff      float64    `json:"polymarket_diff"`
+	CoinbaseDiff        float64    `json:"coinbase_diff"`
+	Direction           Direction  `json:"direction"`
+	HasPendingTrade     bool       `json:"has_pending_trade"`
+	WithinLast30s       bool       `json:"within_last_30s"`
+	DualFeed30Qualified bool       `json:"dual_feed_30_qualified"`
+	SameDirection       bool       `json:"same_direction"`
+	AvgPriceQualified   bool       `json:"avg_price_qualified"`
+	Armed               bool       `json:"armed"`
+	BaseCoinbasePrice   float64    `json:"base_coinbase_price"`
+	SpikeFromBase       float64    `json:"spike_from_base"`
+	SpikeQualified      bool       `json:"spike_qualified"`
+	LastOrderbookCheck  string     `json:"last_orderbook_check,omitempty"`
+	EnteredTrade        bool       `json:"entered_trade"`
+	SkipReason          SkipReason `json:"skip_reason,omitempty"`
+	BlockedReason       string     `json:"blocked_reason,omitempty"`
+}
+
 // MarketOutcome records the result of a 5-minute market.
 type MarketOutcome struct {
 	MarketID     string
@@ -381,6 +406,97 @@ func (e *Engine) hasPendingTradeLocked() bool {
 		}
 	}
 	return false
+}
+
+// GetExperimentalDebug returns per-market experimental strategy diagnostics.
+func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, now time.Time) []ExperimentalMarketDebug {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	hasPending := e.hasPendingTradeLocked()
+	out := make([]ExperimentalMarketDebug, 0, len(e.marketStates))
+
+	for _, state := range e.marketStates {
+		timeToEnd := state.EndTime.Sub(now)
+		pmDiff := polymarketPrice - state.PriceToBeat
+		cbDiff := coinbasePrice - state.PriceToBeat
+		dualFeedOK := math.Abs(pmDiff) >= ExperimentalDiff && math.Abs(cbDiff) >= ExperimentalDiff
+		sameDirection := (pmDiff > 0 && cbDiff > 0) || (pmDiff < 0 && cbDiff < 0)
+		withinWindow := timeToEnd > 0 && timeToEnd <= ExperimentalWindow
+
+		direction := DirectionNone
+		if cbDiff > 0 {
+			direction = DirectionUp
+		} else if cbDiff < 0 {
+			direction = DirectionDown
+		}
+
+		spike := 0.0
+		if state.ExperimentalArmed {
+			spike = coinbasePrice - state.ExperimentalBaseCoinbase
+			if state.ExperimentalDirection == DirectionDown {
+				spike = state.ExperimentalBaseCoinbase - coinbasePrice
+			}
+		}
+		spikeOK := spike >= ExperimentalSpike
+
+		blocked := ""
+		switch {
+		case state.EnteredTrade:
+			blocked = "already_entered_trade"
+		case state.SkipReason != SkipNone:
+			blocked = "market_skipped_" + string(state.SkipReason)
+		case hasPending:
+			blocked = "pending_trade_exists"
+		case !withinWindow:
+			blocked = "outside_last_30s_window"
+		case polymarketPrice <= 0 || coinbasePrice <= 0:
+			blocked = "missing_spot_price"
+		case !dualFeedOK:
+			blocked = "dual_feed_not_30_from_target"
+		case !sameDirection:
+			blocked = "feeds_not_same_direction"
+		case !state.ExperimentalAvgPriceOK:
+			blocked = "avg_price_below_98c_or_unavailable"
+		case !state.ExperimentalArmed:
+			blocked = "not_armed"
+		case !spikeOK:
+			blocked = "coinbase_spike_below_5"
+		default:
+			blocked = ""
+		}
+
+		lastOB := ""
+		if !state.ExperimentalLastOBCheck.IsZero() {
+			lastOB = state.ExperimentalLastOBCheck.UTC().Format(time.RFC3339)
+		}
+
+		out = append(out, ExperimentalMarketDebug{
+			MarketID:            state.MarketID,
+			TimeToEnd:           timeToEnd.Round(time.Second).String(),
+			PriceToBeat:         state.PriceToBeat,
+			PolymarketPrice:     polymarketPrice,
+			CoinbasePrice:       coinbasePrice,
+			PolymarketDiff:      pmDiff,
+			CoinbaseDiff:        cbDiff,
+			Direction:           direction,
+			HasPendingTrade:     hasPending,
+			WithinLast30s:       withinWindow,
+			DualFeed30Qualified: dualFeedOK,
+			SameDirection:       sameDirection,
+			AvgPriceQualified:   state.ExperimentalAvgPriceOK,
+			Armed:               state.ExperimentalArmed,
+			BaseCoinbasePrice:   state.ExperimentalBaseCoinbase,
+			SpikeFromBase:       spike,
+			SpikeQualified:      spikeOK,
+			LastOrderbookCheck:  lastOB,
+			EnteredTrade:        state.EnteredTrade,
+			SkipReason:          state.SkipReason,
+			BlockedReason:       blocked,
+		})
+	}
+
+	return out
 }
 
 func (e *Engine) enterTradeLocked(state *MarketState, direction Direction, btcPrice float64, timestamp time.Time, reason string, tradeSize float64, strategyLabel string) bool {
