@@ -19,14 +19,6 @@ const (
 	OutcomeLose    TradeOutcome = "LOSE"
 )
 
-const (
-	ExperimentalWindow = 30 * time.Second
-	ExperimentalDiff   = 30.0
-	ExperimentalSpike  = 5.0
-	ExperimentalMinAvg = 0.96
-	ExperimentalSize   = 1.0
-)
-
 // TradeDebugContext contains diagnostic info for analyzing losing trades.
 type TradeDebugContext struct {
 	PriceHistory    []PriceSnapshot `json:"price_history"`     // Price samples from entry to resolution
@@ -306,6 +298,7 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, timestamp time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	exp := e.strategy.config.Experimental
 
 	if coinbasePrice <= 0 || polymarketPrice <= 0 || e.hasPendingTradeLocked() {
 		return
@@ -317,7 +310,7 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 		}
 
 		timeToEnd := state.EndTime.Sub(timestamp)
-		if timeToEnd <= 0 || timeToEnd > ExperimentalWindow {
+		if timeToEnd <= 0 || timeToEnd > exp.Window {
 			state.ExperimentalArmed = false
 			state.ExperimentalAvgPriceOK = false
 			continue
@@ -325,7 +318,7 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 
 		pmDiff := polymarketPrice - state.PriceToBeat
 		cbDiff := coinbasePrice - state.PriceToBeat
-		if math.Abs(pmDiff) < ExperimentalDiff || math.Abs(cbDiff) < ExperimentalDiff {
+		if math.Abs(pmDiff) < exp.DualFeedDiff || math.Abs(cbDiff) < exp.DualFeedDiff {
 			state.ExperimentalArmed = false
 			state.ExperimentalAvgPriceOK = false
 			continue
@@ -349,12 +342,12 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 			state.ExperimentalLastOBCheck = time.Time{}
 		}
 
-		if timestamp.Sub(state.ExperimentalLastOBCheck) >= time.Second {
+		if timestamp.Sub(state.ExperimentalLastOBCheck) >= exp.OrderbookCheckFreq {
 			state.ExperimentalLastOBCheck = timestamp
 			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-			entryPrice, ok := e.getRealEntryPrice(ctx, state, direction, ExperimentalSize)
+			entryPrice, ok := e.getRealEntryPrice(ctx, state, direction, exp.TradeSize)
 			cancel()
-			state.ExperimentalAvgPriceOK = ok && entryPrice >= ExperimentalMinAvg
+			state.ExperimentalAvgPriceOK = ok && entryPrice >= exp.MinAvgFillPrice
 		}
 		if !state.ExperimentalAvgPriceOK {
 			continue
@@ -364,12 +357,12 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 		if direction == DirectionDown {
 			spike = state.ExperimentalBaseCoinbase - coinbasePrice
 		}
-		if spike < ExperimentalSpike {
+		if spike < exp.SpikeThreshold {
 			continue
 		}
 
-		reason := fmt.Sprintf("experimental: dual-feed >=$30 from target, avg>=%.2f, coinbase spike $%.2f", ExperimentalMinAvg, spike)
-		e.enterTradeLocked(state, direction, coinbasePrice, timestamp, reason, ExperimentalSize, "experimental")
+		reason := fmt.Sprintf("experimental: dual-feed >=$%.0f from target, avg>=%.2f, coinbase spike $%.2f", exp.DualFeedDiff, exp.MinAvgFillPrice, spike)
+		e.enterTradeLocked(state, direction, coinbasePrice, timestamp, reason, exp.TradeSize, "experimental")
 	}
 }
 
@@ -412,18 +405,19 @@ func (e *Engine) hasPendingTradeLocked() bool {
 func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, now time.Time) []ExperimentalMarketDebug {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	exp := e.strategy.config.Experimental
 
 	hasPending := e.hasPendingTradeLocked()
 	out := make([]ExperimentalMarketDebug, 0, len(e.marketStates))
 
 	for _, state := range e.marketStates {
 		timeToEnd := state.EndTime.Sub(now)
-		if timeToEnd <= 0 || timeToEnd > ExperimentalWindow {
+		if timeToEnd <= 0 || timeToEnd > exp.Window {
 			continue
 		}
 		pmDiff := polymarketPrice - state.PriceToBeat
 		cbDiff := coinbasePrice - state.PriceToBeat
-		dualFeedOK := math.Abs(pmDiff) >= ExperimentalDiff && math.Abs(cbDiff) >= ExperimentalDiff
+		dualFeedOK := math.Abs(pmDiff) >= exp.DualFeedDiff && math.Abs(cbDiff) >= exp.DualFeedDiff
 		sameDirection := (pmDiff > 0 && cbDiff > 0) || (pmDiff < 0 && cbDiff < 0)
 		withinWindow := true
 
@@ -441,7 +435,7 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 				spike = state.ExperimentalBaseCoinbase - coinbasePrice
 			}
 		}
-		spikeOK := spike >= ExperimentalSpike
+		spikeOK := spike >= exp.SpikeThreshold
 
 		blocked := ""
 		switch {
@@ -458,11 +452,11 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 		case !sameDirection:
 			blocked = "feeds_not_same_direction"
 		case !state.ExperimentalAvgPriceOK:
-			blocked = "avg_price_below_98c_or_unavailable"
+			blocked = "avg_price_below_min_or_unavailable"
 		case !state.ExperimentalArmed:
 			blocked = "not_armed"
 		case !spikeOK:
-			blocked = "coinbase_spike_below_5"
+			blocked = "coinbase_spike_below_threshold"
 		default:
 			blocked = ""
 		}

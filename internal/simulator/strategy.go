@@ -63,6 +63,16 @@ type MarketState struct {
 	ExperimentalLastOBCheck  time.Time
 	ExperimentalAvgPriceOK   bool
 }
+˝
+// ExperimentalConfig holds late-window spike-entry parameters.
+type ExperimentalConfig struct {
+	Window             time.Duration // Late entry window before market end
+	DualFeedDiff       float64       // Min absolute diff from target on both feeds
+	SpikeThreshold     float64       // Required Coinbase move after arming
+	MinAvgFillPrice    float64       // Min average fill price required
+	TradeSize          float64       // Trade size in USD
+	OrderbookCheckFreq time.Duration // How often to refresh order book qualification
+}
 
 // StrategyConfig holds the trading strategy parameters.
 type StrategyConfig struct {
@@ -90,6 +100,8 @@ type StrategyConfig struct {
 	MaxExtremeApproach float64 // Max $ the price may have retreated toward target from its 60s extreme
 	// Net adverse move filter
 	MinAdverseNetMove float64 // Skip if price net moved this many $ against the trade direction over the lookback window
+	// Experimental strategy parameters
+	Experimental ExperimentalConfig
 }
 
 // DefaultStrategyConfig returns the default configuration based on user requirements.
@@ -119,6 +131,14 @@ func DefaultStrategyConfig() StrategyConfig {
 		MaxExtremeApproach: 20.0, // Skip if price retreated >$20 toward target from its 60s extreme
 		// Net adverse move filter
 		MinAdverseNetMove: 5.0, // Skip if price net moved >$5 against the trade direction over 60s
+		Experimental: ExperimentalConfig{
+			Window:             30 * time.Second,
+			DualFeedDiff:       30.0,
+			SpikeThreshold:     5.0,
+			MinAvgFillPrice:    0.96,
+			TradeSize:          2.0,
+			OrderbookCheckFreq: 1 * time.Second,
+		},
 	}
 }
 
