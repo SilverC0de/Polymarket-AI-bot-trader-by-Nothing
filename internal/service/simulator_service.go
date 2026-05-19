@@ -20,6 +20,7 @@ import (
 
 // MaxFinanceHistoryLimit caps persisted rows returned from GET /finance (history_limit).
 const MaxFinanceHistoryLimit = 10000
+const MaxExperimentalHistoryOnFinance int64 = 200
 
 // HistoryPageSize is the number of events per GET /finance/history/{page}.
 const HistoryPageSize int64 = 10
@@ -79,6 +80,8 @@ type SimulatorService struct {
 	liveOrderTokens map[string]struct{}
 
 	eventLog store.EventRecorder
+	// Last persisted experimental debug signature per market (for dedupe).
+	experimentalDebugLast map[string]string
 }
 
 // LogEntry represents a log message.
@@ -124,6 +127,8 @@ type SimulatorStatus struct {
 	PersistedTotal int64 `json:"persisted_total,omitempty"`
 	// PersistedEvents is filled when the client passes history_limit on GET /finance.
 	PersistedEvents []store.PersistedEvent `json:"persisted_events,omitempty"`
+	// ExperimentalHistory is a temporary inline audit trail for experimental decisions (newest first).
+	ExperimentalHistory []ExperimentalDebugEvent `json:"experimental_history,omitempty"`
 }
 
 // SimStats contains simulation statistics.
@@ -137,6 +142,13 @@ type SimStats struct {
 	SkipReasons  map[string]int `json:"skip_reasons"`
 }
 
+// ExperimentalDebugEvent is persisted as kind "experimental" for history/audit.
+type ExperimentalDebugEvent struct {
+	Timestamp time.Time                         `json:"timestamp"`
+	MarketID  string                            `json:"market_id"`
+	State     simulator.ExperimentalMarketDebug `json:"state"`
+}
+
 // NewSimulatorService creates a new simulator service.
 func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *SimulatorService {
 	client := polymarket.NewClient()
@@ -144,14 +156,15 @@ func NewSimulatorService(logger *slog.Logger, eventLog store.EventRecorder) *Sim
 	engine := simulator.NewEngine(strategy, client) // Pass client for real order book prices
 
 	s := &SimulatorService{
-		client:          client,
-		engine:          engine,
-		discoverer:      simulator.NewMarketDiscoverer(client),
-		logger:          logger,
-		startTime:       time.Now(),
-		logs:            make([]LogEntry, 0),
-		liveOrderTokens: make(map[string]struct{}),
-		eventLog:        eventLog,
+		client:                client,
+		engine:                engine,
+		discoverer:            simulator.NewMarketDiscoverer(client),
+		logger:                logger,
+		startTime:             time.Now(),
+		logs:                  make([]LogEntry, 0),
+		liveOrderTokens:       make(map[string]struct{}),
+		eventLog:              eventLog,
+		experimentalDebugLast: make(map[string]string),
 	}
 
 	// Wire up live trading if LIVE_TRADING=true and all credentials are present.
@@ -298,6 +311,48 @@ func (s *SimulatorService) persistEvent(kind string, data any) {
 	}
 }
 
+func (s *SimulatorService) captureExperimentalHistory(polymarketPrice, coinbasePrice float64, ts time.Time) {
+	rows := s.engine.GetExperimentalDebug(polymarketPrice, coinbasePrice, ts)
+	if len(rows) == 0 {
+		s.mu.Lock()
+		s.experimentalDebugLast = make(map[string]string)
+		s.mu.Unlock()
+		return
+	}
+
+	next := make(map[string]string, len(rows))
+	toPersist := make([]ExperimentalDebugEvent, 0, len(rows))
+
+	s.mu.Lock()
+	for _, row := range rows {
+		sig := fmt.Sprintf("%s|%t|%t|%t|%t|%t|%t|%s|%.2f",
+			row.BlockedReason,
+			row.WithinLast30s,
+			row.DualFeed30Qualified,
+			row.SameDirection,
+			row.AvgPriceQualified,
+			row.Armed,
+			row.SpikeQualified,
+			row.Direction,
+			row.SpikeFromBase,
+		)
+		next[row.MarketID] = sig
+		if s.experimentalDebugLast[row.MarketID] != sig {
+			toPersist = append(toPersist, ExperimentalDebugEvent{
+				Timestamp: ts.UTC(),
+				MarketID:  row.MarketID,
+				State:     row,
+			})
+		}
+	}
+	s.experimentalDebugLast = next
+	s.mu.Unlock()
+
+	for _, ev := range toPersist {
+		s.persistEvent("experimental", ev)
+	}
+}
+
 func (s *SimulatorService) addLog(level, message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -354,6 +409,7 @@ func (s *SimulatorService) Start(ctx context.Context) error {
 		pmPrice := s.currentPrice
 		s.mu.Unlock()
 		s.engine.ProcessCoinbaseUpdate(price.Value, pmPrice, price.Timestamp)
+		s.captureExperimentalHistory(pmPrice, price.Value, price.Timestamp)
 	}, s.logger)
 
 	if err := s.coinbaseClient.Connect(ctx); err != nil {
@@ -603,7 +659,31 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 		}
 	}
 
+	if s.eventLog != nil {
+		if evs, err := s.eventLog.ListRecent(ctx, MaxExperimentalHistoryOnFinance); err == nil {
+			status.ExperimentalHistory = filterExperimentalEvents(evs)
+		}
+	}
+
 	return status
+}
+
+func filterExperimentalEvents(events []store.PersistedEvent) []ExperimentalDebugEvent {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]ExperimentalDebugEvent, 0, len(events))
+	for i := range events {
+		if events[i].Kind != "experimental" {
+			continue
+		}
+		var ev ExperimentalDebugEvent
+		if err := json.Unmarshal(events[i].Data, &ev); err != nil {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 // PersistedRecent returns newest persisted events (newest first).

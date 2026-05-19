@@ -312,7 +312,7 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 	}
 
 	for _, state := range e.marketStates {
-		if state.EnteredTrade || state.SkipReason != SkipNone {
+		if state.EnteredTrade {
 			continue
 		}
 
@@ -418,11 +418,14 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 
 	for _, state := range e.marketStates {
 		timeToEnd := state.EndTime.Sub(now)
+		if timeToEnd <= 0 || timeToEnd > ExperimentalWindow {
+			continue
+		}
 		pmDiff := polymarketPrice - state.PriceToBeat
 		cbDiff := coinbasePrice - state.PriceToBeat
 		dualFeedOK := math.Abs(pmDiff) >= ExperimentalDiff && math.Abs(cbDiff) >= ExperimentalDiff
 		sameDirection := (pmDiff > 0 && cbDiff > 0) || (pmDiff < 0 && cbDiff < 0)
-		withinWindow := timeToEnd > 0 && timeToEnd <= ExperimentalWindow
+		withinWindow := true
 
 		direction := DirectionNone
 		if cbDiff > 0 {
@@ -444,8 +447,6 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 		switch {
 		case state.EnteredTrade:
 			blocked = "already_entered_trade"
-		case state.SkipReason != SkipNone:
-			blocked = "market_skipped_" + string(state.SkipReason)
 		case hasPending:
 			blocked = "pending_trade_exists"
 		case !withinWindow:
