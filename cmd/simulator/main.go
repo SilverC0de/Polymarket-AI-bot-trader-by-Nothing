@@ -24,7 +24,7 @@ const (
 ║                                                                      ║
 ║  Strategy Rules:                                                     ║
 ║  • Price diff from target: $40–$120 (DefaultStrategyConfig)          ║
-║  • Entry window: 20s-2min before market end                         ║
+║  • Entry window: 30s-2min before market end                         ║
 ║  • Skip sideways markets (price crossed target both ways)           ║
 ║  • Follow trend: UP trend → bet UP, DOWN trend → bet DOWN           ║
 ║  • Trade size: $10 per trade                                        ║

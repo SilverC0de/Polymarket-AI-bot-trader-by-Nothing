@@ -14,6 +14,7 @@ import (
 
 	"github.com/silver/pmvibes/internal/simulator"
 	"github.com/silver/pmvibes/internal/store"
+	"github.com/silver/pmvibes/pkg/coinbase"
 	"github.com/silver/pmvibes/pkg/polymarket"
 )
 
@@ -55,17 +56,20 @@ func nextFullBTC5mWindow(now time.Time) time.Time {
 
 // SimulatorService manages the BTC 5m trading simulation.
 type SimulatorService struct {
-	mu          sync.RWMutex
-	client      *polymarket.Client
-	engine      *simulator.Engine
-	priceClient *polymarket.PriceClient
-	discoverer  *simulator.MarketDiscoverer
-	logger      *slog.Logger
+	mu             sync.RWMutex
+	client         *polymarket.Client
+	engine         *simulator.Engine
+	priceClient    *polymarket.PriceClient
+	coinbaseClient *coinbase.PriceClient
+	discoverer     *simulator.MarketDiscoverer
+	logger         *slog.Logger
 
-	currentPrice float64
-	lastPriceAt  time.Time
-	running      bool
-	startTime    time.Time
+	currentPrice   float64
+	lastPriceAt    time.Time
+	coinbasePrice  float64
+	lastCoinbaseAt time.Time
+	running        bool
+	startTime      time.Time
 	// marketsReadyAt is when market discovery may begin (next 5m boundary after
 	// startup). Zero means no deferred start (warmup disabled).
 	marketsReadyAt time.Time
@@ -86,14 +90,16 @@ type LogEntry struct {
 
 // SimulatorStatus is the response for /finance endpoint.
 type SimulatorStatus struct {
-	ServerTime     string  `json:"server_time"`
-	PolymarketTime string  `json:"polymarket_time"`
-	Running        bool    `json:"running"`
-	Uptime         string  `json:"uptime"`
-	CurrentPrice   float64 `json:"current_btc_price"`
-	TargetPrice    float64 `json:"target_price,omitempty"`
-	PriceDiff      float64 `json:"price_diff,omitempty"`
-	TimeToEnd      string  `json:"time_to_end,omitempty"`
+	ServerTime        string  `json:"server_time"`
+	PolymarketTime    string  `json:"polymarket_time"`
+	Running           bool    `json:"running"`
+	Uptime            string  `json:"uptime"`
+	CurrentPrice      float64 `json:"current_btc_price"`
+	CoinbasePrice     float64 `json:"coinbase_btc_price,omitempty"`
+	TargetPrice       float64 `json:"target_price,omitempty"`
+	PriceDiff         float64 `json:"price_diff,omitempty"`
+	CoinbasePriceDiff float64 `json:"coinbase_price_diff,omitempty"`
+	TimeToEnd         string  `json:"time_to_end,omitempty"`
 	// Trend is UP, DOWN, or NONE from strategy price history for the soonest-ending active market.
 	Trend string `json:"trend,omitempty"`
 
@@ -339,6 +345,23 @@ func (s *SimulatorService) Start(ctx context.Context) error {
 	}
 	s.addLog("INFO", "Connected to Polymarket price stream")
 
+	// Connect to Coinbase price stream (secondary feed)
+	s.coinbaseClient = coinbase.NewPriceClient(func(price coinbase.PriceUpdate) {
+		s.mu.Lock()
+		s.coinbasePrice = price.Value
+		s.lastCoinbaseAt = price.Timestamp
+		pmPrice := s.currentPrice
+		s.mu.Unlock()
+		s.engine.ProcessCoinbaseUpdate(price.Value, pmPrice, price.Timestamp)
+	}, s.logger)
+
+	if err := s.coinbaseClient.Connect(ctx); err != nil {
+		s.logger.Error("Failed to connect to Coinbase price stream", "err", err)
+		s.addLog("WARN", fmt.Sprintf("Failed to connect to Coinbase price stream: %v (continuing)", err))
+	} else {
+		s.addLog("INFO", "Connected to Coinbase price stream (secondary)")
+	}
+
 	var readyAt time.Time
 	if !strings.EqualFold(os.Getenv(skipMarketsWarmupEnv), "true") {
 		readyAt = nextFullBTC5mWindow(time.Now())
@@ -495,6 +518,7 @@ func (s *SimulatorService) marketResolutionLoop(ctx context.Context) {
 func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) SimulatorStatus {
 	s.mu.RLock()
 	currentPrice := s.currentPrice
+	coinbasePrice := s.coinbasePrice
 	running := s.running
 	startTime := s.startTime
 	lastPriceAt := s.lastPriceAt
@@ -524,6 +548,7 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 		Running:          running,
 		Uptime:           time.Since(startTime).Round(time.Second).String(),
 		CurrentPrice:     currentPrice,
+		CoinbasePrice:    coinbasePrice,
 		PriceAgeSeconds:  priceAge,
 		PriceFeedHealthy: healthy,
 		WSConnected:      wsConnected,
@@ -547,6 +572,9 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 	if hasTarget {
 		status.TargetPrice = target
 		status.PriceDiff = currentPrice - target
+		if coinbasePrice > 0 {
+			status.CoinbasePriceDiff = coinbasePrice - target
+		}
 		status.TimeToEnd = timeToEnd.Round(time.Second).String()
 	}
 
@@ -684,6 +712,10 @@ func (s *SimulatorService) Stop() {
 	if s.priceClient != nil {
 		s.priceClient.Close()
 		s.priceClient = nil
+	}
+	if s.coinbaseClient != nil {
+		s.coinbaseClient.Close()
+		s.coinbaseClient = nil
 	}
 	s.running = false
 	s.mu.Unlock()

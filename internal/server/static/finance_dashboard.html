@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Polymarket 02 // finance</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
       --bg: #020510;
@@ -529,15 +530,6 @@
       );
     }
 
-    /** Details panel: Trend from spot − target (same as Difference). */
-    function fmtDetailsTrendFromDiff(s) {
-      const d = s.price_diff;
-      if (typeof d !== "number" || Number.isNaN(d)) return "—";
-      if (d > 0) return "Up";
-      if (d < 0) return "Down";
-      return "—";
-    }
-
     function skipReasonTitles() {
       return {
         price_diff_too_small: "Price too close to target price",
@@ -613,11 +605,13 @@
       det += receiptRowText("Server time", String(s.server_time || "—"));
       det += receiptRowText("Polymarket time", String(s.polymarket_time || "—"));
       det += receiptRowText("Uptime", String(s.uptime || "—"));
-      det += receiptRowText("BTC spot", btc);
       det += receiptRowText("Target", s.target_price != null ? fmtNum(s.target_price, 2) : "—");
+      det += receiptRowText("Polymarket BTC price", btc);
+      det += receiptRowText("Coinbase BTC price", s.coinbase_btc_price != null ? `$${fmtNum(s.coinbase_btc_price, 2)}` : "—");
       det += receiptRowText("Difference", s.price_diff != null ? fmtNum(s.price_diff, 2) : "—");
-      det += receiptRowText("Trend", fmtDetailsTrendFromDiff(s));
+      det += receiptRowText("Coinbase difference", s.coinbase_price_diff != null ? fmtNum(s.coinbase_price_diff, 2) : "—");
       det += receiptRowText("Time to market end", String(s.time_to_end || "—"));
+
       $("detailsReceipt").innerHTML = det;
 
       const strip = $("feedStrip");
@@ -904,7 +898,7 @@
     });
 
     pulse().catch(() => {});
-    setInterval(() => pulseLive().catch(() => {}), 3000);
+    setInterval(() => pulseLive().catch(() => {}), 250);
   </script>
 </body>
 </html>

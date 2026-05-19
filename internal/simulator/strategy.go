@@ -56,13 +56,19 @@ type MarketState struct {
 	SkipReason     SkipReason
 	UpTokenID      string // Token ID for "Up" outcome (YES)
 	DownTokenID    string // Token ID for "Down" outcome (NO)
+	// Experimental strategy state (last-30s spike entry).
+	ExperimentalArmed        bool
+	ExperimentalDirection    Direction
+	ExperimentalBaseCoinbase float64
+	ExperimentalLastOBCheck  time.Time
+	ExperimentalAvgPriceOK   bool
 }
 
 // StrategyConfig holds the trading strategy parameters.
 type StrategyConfig struct {
 	MinPriceDiff       float64       // Minimum price difference from target ($70)
 	MaxPriceDiff       float64       // Maximum price difference from target ($120)
-	MinTimeToEnd       time.Duration // Minimum time before market ends (1 min)
+	MinTimeToEnd       time.Duration // Minimum time before market ends (30s)
 	MaxTimeToEnd       time.Duration // Maximum time before market ends (3 min)
 	TradeSize          float64       // Trade size in USD ($10)
 	TrendSampleCount   int           // Number of samples to determine trend
@@ -91,7 +97,7 @@ func DefaultStrategyConfig() StrategyConfig {
 	return StrategyConfig{
 		MinPriceDiff:       70.0,
 		MaxPriceDiff:       120.0,
-		MinTimeToEnd:       20 * time.Second,
+		MinTimeToEnd:       30 * time.Second,
 		MaxTimeToEnd:       2 * time.Minute,
 		TradeSize:          10.0,
 		TrendSampleCount:   5,

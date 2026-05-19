@@ -3,6 +3,7 @@ package simulator
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -16,6 +17,14 @@ const (
 	OutcomePending TradeOutcome = "PENDING"
 	OutcomeWin     TradeOutcome = "WIN"
 	OutcomeLose    TradeOutcome = "LOSE"
+)
+
+const (
+	ExperimentalWindow = 30 * time.Second
+	ExperimentalDiff   = 30.0
+	ExperimentalSpike  = 5.0
+	ExperimentalMinAvg = 0.98
+	ExperimentalSize   = 1.0
 )
 
 // TradeDebugContext contains diagnostic info for analyzing losing trades.
@@ -36,6 +45,7 @@ type SimulatedTrade struct {
 	EntryBTCPrice float64   // BTC price when trade was entered
 	EntryReason   string
 	TradeSize     float64            // USD amount ($10)
+	StrategyLabel string             // "default" or "experimental"
 	EntryPrice    float64            // Price paid for the outcome token (e.g., 0.55)
 	RealOrderBook bool               // True if EntryPrice came from real order book, false if simulated
 	Outcome       TradeOutcome       // WIN, LOSE, or PENDING
@@ -215,7 +225,7 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	for marketID, state := range e.marketStates {
+	for _, state := range e.marketStates {
 		// Skip if already traded or skipped
 		if state.EnteredTrade || state.SkipReason != SkipNone {
 			continue
@@ -244,7 +254,7 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 			// Permanent skip (sideways market, timing too late, etc.)
 			state.SkipReason = skipReason
 			skip := SkippedMarket{
-				MarketID:     marketID,
+				MarketID:     state.MarketID,
 				Timestamp:    timestamp,
 				Reason:       skipReason,
 				Details:      reason,
@@ -262,81 +272,79 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 		}
 
 		if direction != DirectionNone {
-			// Try to get real entry price from order book
-			var entryPrice float64
-			var realOrderBook bool
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			if realPrice, ok := e.getRealEntryPrice(ctx, state, direction, e.strategy.config.TradeSize); ok {
-				entryPrice = realPrice
-				realOrderBook = true
-			} else {
-				// Fall back to simulated price
-				entryPrice = e.calculateEntryPrice(btcPrice, state.PriceToBeat, direction)
-				realOrderBook = false
-			}
-			cancel()
-
-			if entryPrice > e.strategy.config.MaxEntryPrice {
-				e.recordSkip(state, timestamp, SkipNoLiquidity,
-					fmt.Sprintf("entry price %.4f above max %.4f", entryPrice, e.strategy.config.MaxEntryPrice),
-					btcPrice)
-				continue
-			}
-			if profit := potentialProfit(e.strategy.config.TradeSize, entryPrice); profit < e.strategy.config.MinProfitUSD {
-				e.recordSkip(state, timestamp, SkipNoLiquidity,
-					fmt.Sprintf("win profit $%.2f below minimum $%.2f at entry price %.4f", profit, e.strategy.config.MinProfitUSD, entryPrice),
-					btcPrice)
-				continue
-			}
-
-			// Enter trade
-			e.tradeCounter++
-			state.EnteredTrade = true
-			state.TradeDirection = direction
-
-			// Capture debug metrics at entry
-			entryMomentum := e.strategy.calculateMomentum(state.PriceHistory, state.PriceToBeat)
-			entryRecentMove := e.strategy.calculateRecentMove(state.PriceHistory, direction)
-
-			trade := SimulatedTrade{
-				ID:            e.tradeCounter,
-				MarketID:      marketID,
-				EntryTime:     timestamp,
-				MarketEndTime: state.EndTime,
-				Direction:     direction,
-				PriceToBeat:   state.PriceToBeat,
-				EntryBTCPrice: btcPrice,
-				EntryReason:   reason,
-				TradeSize:     e.strategy.config.TradeSize,
-				EntryPrice:    entryPrice,
-				RealOrderBook: realOrderBook,
-				Outcome:       OutcomePending,
-				DebugContext: &TradeDebugContext{
-					EntryMomentum:   entryMomentum,
-					EntryRecentMove: entryRecentMove,
-					PriceHistory:    make([]PriceSnapshot, len(state.PriceHistory)),
-				},
-			}
-			// Copy price history at entry
-			copy(trade.DebugContext.PriceHistory, state.PriceHistory)
-
-			e.trades = append(e.trades, trade)
-
-			if e.onTradeUpdate != nil {
-				go e.onTradeUpdate(trade)
-			}
-
-			// Dispatch live order if configured.
-			if e.onLiveTrade != nil {
-				tokenID := state.UpTokenID
-				if direction == DirectionDown {
-					tokenID = state.DownTokenID
-				}
-				if tokenID != "" {
-					go e.onLiveTrade(context.Background(), tokenID, direction, e.strategy.config.TradeSize, entryPrice)
-				}
-			}
+			e.enterTradeLocked(state, direction, btcPrice, timestamp, reason, e.strategy.config.TradeSize, "default")
 		}
+	}
+}
+
+// ProcessCoinbaseUpdate checks late-window experimental entries based on Coinbase spikes.
+func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, timestamp time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if coinbasePrice <= 0 || polymarketPrice <= 0 || e.hasPendingTradeLocked() {
+		return
+	}
+
+	for _, state := range e.marketStates {
+		if state.EnteredTrade || state.SkipReason != SkipNone {
+			continue
+		}
+
+		timeToEnd := state.EndTime.Sub(timestamp)
+		if timeToEnd <= 0 || timeToEnd > ExperimentalWindow {
+			state.ExperimentalArmed = false
+			state.ExperimentalAvgPriceOK = false
+			continue
+		}
+
+		pmDiff := polymarketPrice - state.PriceToBeat
+		cbDiff := coinbasePrice - state.PriceToBeat
+		if math.Abs(pmDiff) < ExperimentalDiff || math.Abs(cbDiff) < ExperimentalDiff {
+			state.ExperimentalArmed = false
+			state.ExperimentalAvgPriceOK = false
+			continue
+		}
+
+		direction := DirectionUp
+		if cbDiff < 0 {
+			direction = DirectionDown
+		}
+		if (pmDiff > 0 && cbDiff < 0) || (pmDiff < 0 && cbDiff > 0) {
+			state.ExperimentalArmed = false
+			state.ExperimentalAvgPriceOK = false
+			continue
+		}
+
+		if !state.ExperimentalArmed || state.ExperimentalDirection != direction {
+			state.ExperimentalArmed = true
+			state.ExperimentalDirection = direction
+			state.ExperimentalBaseCoinbase = coinbasePrice
+			state.ExperimentalAvgPriceOK = false
+			state.ExperimentalLastOBCheck = time.Time{}
+		}
+
+		if timestamp.Sub(state.ExperimentalLastOBCheck) >= time.Second {
+			state.ExperimentalLastOBCheck = timestamp
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			entryPrice, ok := e.getRealEntryPrice(ctx, state, direction, ExperimentalSize)
+			cancel()
+			state.ExperimentalAvgPriceOK = ok && entryPrice >= ExperimentalMinAvg
+		}
+		if !state.ExperimentalAvgPriceOK {
+			continue
+		}
+
+		spike := coinbasePrice - state.ExperimentalBaseCoinbase
+		if direction == DirectionDown {
+			spike = state.ExperimentalBaseCoinbase - coinbasePrice
+		}
+		if spike < ExperimentalSpike {
+			continue
+		}
+
+		reason := fmt.Sprintf("experimental: dual-feed >=$30 from target, avg>=%.2f, coinbase spike $%.2f", ExperimentalMinAvg, spike)
+		e.enterTradeLocked(state, direction, coinbasePrice, timestamp, reason, ExperimentalSize, "experimental")
 	}
 }
 
@@ -364,6 +372,88 @@ func potentialProfit(amountUSD, entryPrice float64) float64 {
 	}
 	shares := amountUSD / entryPrice
 	return (1 - entryPrice) * shares
+}
+
+func (e *Engine) hasPendingTradeLocked() bool {
+	for _, trade := range e.trades {
+		if trade.Outcome == OutcomePending {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) enterTradeLocked(state *MarketState, direction Direction, btcPrice float64, timestamp time.Time, reason string, tradeSize float64, strategyLabel string) bool {
+	var entryPrice float64
+	var realOrderBook bool
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if realPrice, ok := e.getRealEntryPrice(ctx, state, direction, tradeSize); ok {
+		entryPrice = realPrice
+		realOrderBook = true
+	} else {
+		entryPrice = e.calculateEntryPrice(btcPrice, state.PriceToBeat, direction)
+		realOrderBook = false
+	}
+	cancel()
+
+	if entryPrice > e.strategy.config.MaxEntryPrice {
+		e.recordSkip(state, timestamp, SkipNoLiquidity,
+			fmt.Sprintf("entry price %.4f above max %.4f", entryPrice, e.strategy.config.MaxEntryPrice),
+			btcPrice)
+		return false
+	}
+	if strategyLabel != "experimental" {
+		if profit := potentialProfit(tradeSize, entryPrice); profit < e.strategy.config.MinProfitUSD {
+			e.recordSkip(state, timestamp, SkipNoLiquidity,
+				fmt.Sprintf("win profit $%.2f below minimum $%.2f at entry price %.4f", profit, e.strategy.config.MinProfitUSD, entryPrice),
+				btcPrice)
+			return false
+		}
+	}
+
+	e.tradeCounter++
+	state.EnteredTrade = true
+	state.TradeDirection = direction
+
+	entryMomentum := e.strategy.calculateMomentum(state.PriceHistory, state.PriceToBeat)
+	entryRecentMove := e.strategy.calculateRecentMove(state.PriceHistory, direction)
+
+	trade := SimulatedTrade{
+		ID:            e.tradeCounter,
+		MarketID:      state.MarketID,
+		EntryTime:     timestamp,
+		MarketEndTime: state.EndTime,
+		Direction:     direction,
+		PriceToBeat:   state.PriceToBeat,
+		EntryBTCPrice: btcPrice,
+		EntryReason:   reason,
+		TradeSize:     tradeSize,
+		StrategyLabel: strategyLabel,
+		EntryPrice:    entryPrice,
+		RealOrderBook: realOrderBook,
+		Outcome:       OutcomePending,
+		DebugContext: &TradeDebugContext{
+			EntryMomentum:   entryMomentum,
+			EntryRecentMove: entryRecentMove,
+			PriceHistory:    make([]PriceSnapshot, len(state.PriceHistory)),
+		},
+	}
+	copy(trade.DebugContext.PriceHistory, state.PriceHistory)
+	e.trades = append(e.trades, trade)
+
+	if e.onTradeUpdate != nil {
+		go e.onTradeUpdate(trade)
+	}
+	if e.onLiveTrade != nil {
+		tokenID := state.UpTokenID
+		if direction == DirectionDown {
+			tokenID = state.DownTokenID
+		}
+		if tokenID != "" {
+			go e.onLiveTrade(context.Background(), tokenID, direction, tradeSize, entryPrice)
+		}
+	}
+	return true
 }
 
 // calculateEntryPrice simulates the entry price when the order book is unavailable.
