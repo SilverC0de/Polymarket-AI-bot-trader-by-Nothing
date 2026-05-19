@@ -24,7 +24,7 @@ const (
 ║                                                                      ║
 ║  Strategy Rules:                                                     ║
 ║  • Price diff from target: $40–$120 (DefaultStrategyConfig)          ║
-║  • Entry window: 30s-2min before market end                         ║
+║  • Entry window: 30s-100s before market end                         ║
 ║  • Skip sideways markets (price crossed target both ways)           ║
 ║  • Follow trend: UP trend → bet UP, DOWN trend → bet DOWN           ║
 ║  • Trade size: $10 per trade                                        ║
@@ -326,17 +326,17 @@ func livePriceDisplayLoop(ctx context.Context, engine *simulator.Engine) {
 					diffSign = ""
 				}
 
-				// Check conditions (30s - 3min window)
+				// Check conditions (30s - 100s window)
 				diffOK := absDiff >= 30 && absDiff <= 60
-				timeOK := timeToEnd >= 30*time.Second && timeToEnd <= 3*time.Minute
+				timeOK := timeToEnd >= 30*time.Second && timeToEnd <= 100*time.Second
 
 				status := "⏳ WAITING"
 				if diffOK && timeOK {
 					status = "🟢 READY"
 				} else if timeToEnd < 30*time.Second {
 					status = "⚠️ TOO LATE"
-				} else if timeToEnd > 3*time.Minute {
-					status = "⏳ WAIT " + formatDuration(timeToEnd-3*time.Minute)
+				} else if timeToEnd > 100*time.Second {
+					status = "⏳ WAIT " + formatDuration(timeToEnd-100*time.Second)
 				}
 
 				fmt.Printf("\r💰 $%.2f %s | 🎯 $%.2f (%s$%.0f) | ⏱️ %s | %s | W/L: %d/%d | PnL: $%.2f      ",

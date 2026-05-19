@@ -6,7 +6,6 @@ import (
 	"math"
 	"sync"
 	"time"
-
 	"github.com/silver/pmvibes/pkg/polymarket"
 )
 
@@ -148,6 +147,8 @@ type Engine struct {
 	onSkip                  func(skip SkippedMarket)
 	onMarketEnd             func(outcome MarketOutcome)
 	onLiveTrade             LiveTradeFunc // nil when not in live-trading mode
+	lastPolymarketPrice     float64
+	lastCoinbasePrice       float64
 }
 
 // NewEngine creates a new simulation engine.
@@ -264,6 +265,7 @@ func (e *Engine) getRealEntryPrice(ctx context.Context, state *MarketState, dire
 func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.lastPolymarketPrice = btcPrice
 
 	for _, state := range e.marketStates {
 		// Skip if already traded or skipped
@@ -312,6 +314,9 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 		}
 
 		if direction != DirectionNone {
+			if e.isCrossFeedDivergenceExceeded(e.lastCoinbasePrice, e.lastPolymarketPrice) {
+				continue
+			}
 			e.enterTradeLocked(state, direction, btcPrice, timestamp, reason, e.strategy.config.TradeSize, "default", "")
 		}
 	}
@@ -322,6 +327,8 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	exp := e.strategy.config.Experimental
+	e.lastCoinbasePrice = coinbasePrice
+	e.lastPolymarketPrice = polymarketPrice
 
 	if coinbasePrice <= 0 || polymarketPrice <= 0 || e.hasPendingTradeLocked() {
 		return
@@ -360,6 +367,13 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 			direction = DirectionDown
 		}
 		if (pmDiff > 0 && cbDiff < 0) || (pmDiff < 0 && cbDiff > 0) {
+			state.ExperimentalArmed = false
+			state.ExperimentalAvgPriceOK = false
+			state.ExperimentalTrigger1Armed = false
+			state.ExperimentalTrigger2Armed = false
+			continue
+		}
+		if e.isCrossFeedDivergenceExceeded(coinbasePrice, polymarketPrice) {
 			state.ExperimentalArmed = false
 			state.ExperimentalAvgPriceOK = false
 			state.ExperimentalTrigger1Armed = false
@@ -540,6 +554,14 @@ func (e *Engine) hasPendingTradeLocked() bool {
 	return false
 }
 
+func (e *Engine) isCrossFeedDivergenceExceeded(coinbasePrice, polymarketPrice float64) bool {
+	maxGap := e.strategy.config.MaxCrossFeedDivergence
+	if maxGap <= 0 || coinbasePrice <= 0 || polymarketPrice <= 0 {
+		return false
+	}
+	return math.Abs(coinbasePrice-polymarketPrice) > maxGap
+}
+
 // GetExperimentalDebug returns per-market experimental strategy diagnostics.
 func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, now time.Time) []ExperimentalMarketDebug {
 	e.mu.RLock()
@@ -609,6 +631,8 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 			blocked = "outside_last_30s_window"
 		case polymarketPrice <= 0 || coinbasePrice <= 0:
 			blocked = "missing_spot_price"
+		case e.isCrossFeedDivergenceExceeded(coinbasePrice, polymarketPrice):
+			blocked = "cross_feed_divergence_too_high"
 		case !dualFeedOK:
 			blocked = "dual_feed_below_min_threshold"
 		case !sameDirection:
@@ -678,6 +702,12 @@ func (e *Engine) enterTradeLocked(state *MarketState, direction Direction, btcPr
 	if entryPrice > e.strategy.config.MaxEntryPrice {
 		e.recordSkip(state, timestamp, SkipNoLiquidity,
 			fmt.Sprintf("entry price %.4f above max %.4f", entryPrice, e.strategy.config.MaxEntryPrice),
+			btcPrice)
+		return false
+	}
+	if strategyLabel == "default" && entryPrice < e.strategy.config.MinEntryPrice {
+		e.recordSkip(state, timestamp, SkipNoLiquidity,
+			fmt.Sprintf("entry price %.4f below min %.4f", entryPrice, e.strategy.config.MinEntryPrice),
 			btcPrice)
 		return false
 	}

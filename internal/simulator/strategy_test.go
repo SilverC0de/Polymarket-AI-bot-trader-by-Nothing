@@ -72,6 +72,23 @@ func TestDefaultStrategyAllowsStrongCushionWithTrend(t *testing.T) {
 	}
 }
 
+func TestDefaultStrategyConfigEntryAndTimingGuards(t *testing.T) {
+	cfg := DefaultStrategyConfig()
+
+	if cfg.MinTimeToEnd != 30*time.Second {
+		t.Fatalf("MinTimeToEnd = %s, want %s", cfg.MinTimeToEnd, 30*time.Second)
+	}
+	if cfg.MaxTimeToEnd != 100*time.Second {
+		t.Fatalf("MaxTimeToEnd = %s, want %s", cfg.MaxTimeToEnd, 100*time.Second)
+	}
+	if cfg.MinEntryPrice != 0.96 {
+		t.Fatalf("MinEntryPrice = %.4f, want 0.9600", cfg.MinEntryPrice)
+	}
+	if cfg.MaxCrossFeedDivergence != 12.0 {
+		t.Fatalf("MaxCrossFeedDivergence = %.2f, want 12.00", cfg.MaxCrossFeedDivergence)
+	}
+}
+
 func TestDangerousPatternTriggersAtSeventyTwoDollarCushion(t *testing.T) {
 	strategy := NewStrategy(DefaultStrategyConfig())
 

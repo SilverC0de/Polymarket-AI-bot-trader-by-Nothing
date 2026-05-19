@@ -88,19 +88,21 @@ type ExperimentalTriggerConfig struct {
 
 // StrategyConfig holds the trading strategy parameters.
 type StrategyConfig struct {
-	MinPriceDiff       float64       // Minimum price difference from target ($70)
-	MaxPriceDiff       float64       // Maximum price difference from target ($120)
-	MinTimeToEnd       time.Duration // Minimum time before market ends (30s)
-	MaxTimeToEnd       time.Duration // Maximum time before market ends (3 min)
-	TradeSize          float64       // Trade size in USD ($10)
-	TrendSampleCount   int           // Number of samples to determine trend
-	MomentumSamples    int           // Number of recent samples for momentum check
-	MinMomentum        float64       // Minimum $/sec momentum away from target (for small cushions)
-	MaxRecentMove      float64       // Absolute max price move before considered overextended
-	MaxRecentMoveRatio float64       // Max recent move as ratio of cushion (e.g., 0.6 = 60%)
-	RecentMoveLookback time.Duration // How far back to check for rapid moves
-	MaxEntryPrice      float64       // Max average fill price for order book check
-	MinProfitUSD       float64       // Minimum profit for order book check
+	MinPriceDiff           float64       // Minimum price difference from target ($70)
+	MaxPriceDiff           float64       // Maximum price difference from target ($120)
+	MinTimeToEnd           time.Duration // Minimum time before market ends (30s)
+	MaxTimeToEnd           time.Duration // Maximum time before market ends (100s)
+	TradeSize              float64       // Trade size in USD ($10)
+	TrendSampleCount       int           // Number of samples to determine trend
+	MomentumSamples        int           // Number of recent samples for momentum check
+	MinMomentum            float64       // Minimum $/sec momentum away from target (for small cushions)
+	MaxRecentMove          float64       // Absolute max price move before considered overextended
+	MaxRecentMoveRatio     float64       // Max recent move as ratio of cushion (e.g., 0.6 = 60%)
+	RecentMoveLookback     time.Duration // How far back to check for rapid moves
+	MinEntryPrice          float64       // Min average fill price for default strategy order book check
+	MaxEntryPrice          float64       // Max average fill price for order book check
+	MaxCrossFeedDivergence float64       // Block entries when abs(Coinbase-Polymarket) exceeds this ($)
+	MinProfitUSD           float64       // Minimum profit for order book check
 	// Cushion-based scaling
 	LargeCushionThreshold float64 // Cushion above this gets relaxed momentum check ($60)
 	LargeCushionMomentum  float64 // Minimum momentum for large cushions ($/sec)
@@ -119,19 +121,21 @@ type StrategyConfig struct {
 // DefaultStrategyConfig returns the default configuration based on user requirements.
 func DefaultStrategyConfig() StrategyConfig {
 	return StrategyConfig{
-		MinPriceDiff:       70.0,
-		MaxPriceDiff:       120.0,
-		MinTimeToEnd:       30 * time.Second,
-		MaxTimeToEnd:       2 * time.Minute,
-		TradeSize:          10.0,
-		TrendSampleCount:   5,
-		MomentumSamples:    3,                // Check last 3 samples
-		MinMomentum:        0.5,              // Must be moving away at $0.50/sec minimum (for small cushions)
-		MaxRecentMove:      50.0,             // Absolute cap: skip if moved >$50 regardless of cushion
-		MaxRecentMoveRatio: 0.70,             // Skip if recent move > 70% of cushion
-		RecentMoveLookback: 60 * time.Second, // Check last 60 seconds
-		MaxEntryPrice:      0.995,            // Order book check - slightly more lenient
-		MinProfitUSD:       0.10,             // Order book check - very lenient
+		MinPriceDiff:           70.0,
+		MaxPriceDiff:           120.0,
+		MinTimeToEnd:           30 * time.Second,
+		MaxTimeToEnd:           100 * time.Second,
+		TradeSize:              1.0,
+		TrendSampleCount:       5,
+		MomentumSamples:        3,                // Check last 3 samples
+		MinMomentum:            0.5,              // Must be moving away at $0.50/sec minimum (for small cushions)
+		MaxRecentMove:          50.0,             // Absolute cap: skip if moved >$50 regardless of cushion
+		MaxRecentMoveRatio:     0.70,             // Skip if recent move > 70% of cushion
+		RecentMoveLookback:     60 * time.Second, // Check last 60 seconds
+		MinEntryPrice:          0.96,             // Default strategy only - do not enter below 96c
+		MaxEntryPrice:          0.995,            // Order book check - slightly more lenient
+		MaxCrossFeedDivergence: 12.0,             // Block both strategies when feed gap exceeds $12
+		MinProfitUSD:           0.10,             // Order book check - very lenient
 		// Cushion-based scaling for momentum (threshold must be <= MinPriceDiff to be active)
 		LargeCushionThreshold: 70.0, // Cushions >= $70 get relaxed momentum check
 		LargeCushionMomentum:  0.15, // Only need $0.15/sec momentum with large cushion
@@ -145,7 +149,7 @@ func DefaultStrategyConfig() StrategyConfig {
 		MinAdverseNetMove: 5.0, // Skip if price net moved >$5 against the trade direction over 60s
 		Experimental: ExperimentalConfig{
 			Window:             30 * time.Second,
-			TradeSize:          4.0,
+			TradeSize:          1.0,
 			OrderbookCheckFreq: 1 * time.Second,
 			TriggerA: ExperimentalTriggerConfig{
 				DualFeedDiff:       40.0,
