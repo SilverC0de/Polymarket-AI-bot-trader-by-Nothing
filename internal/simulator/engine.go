@@ -475,8 +475,8 @@ func clamp(v, lo, hi float64) float64 {
 }
 
 func dynamicMinAvgFill(cfg ExperimentalTriggerConfig, timeToEnd time.Duration, absDiff float64, window time.Duration) float64 {
-	if cfg.MinAvgFillFloor <= 0 || cfg.MinAvgFillFloor >= cfg.MinAvgFillPrice {
-		return cfg.MinAvgFillPrice
+	if cfg.LowestMinAvgFill <= 0 || cfg.LowestMinAvgFill >= cfg.StartingMinAvgFill {
+		return cfg.StartingMinAvgFill
 	}
 	var timeProgress float64
 	if window > 0 {
@@ -485,10 +485,10 @@ func dynamicMinAvgFill(cfg ExperimentalTriggerConfig, timeToEnd time.Duration, a
 	// Diff progression reaches 1x at 2x threshold distance, so very large dislocations
 	// relax fill requirements more than marginal threshold breaches.
 	diffProgress := clamp((absDiff-cfg.DualFeedDiff)/cfg.DualFeedDiff, 0, 1)
-	relax := (cfg.MinAvgFillPrice - cfg.MinAvgFillFloor) * ((0.6 * timeProgress) + (0.4 * diffProgress))
-	out := cfg.MinAvgFillPrice - relax
-	if out < cfg.MinAvgFillFloor {
-		return cfg.MinAvgFillFloor
+	relax := (cfg.StartingMinAvgFill - cfg.LowestMinAvgFill) * ((0.6 * timeProgress) + (0.4 * diffProgress))
+	out := cfg.StartingMinAvgFill - relax
+	if out < cfg.LowestMinAvgFill {
+		return cfg.LowestMinAvgFill
 	}
 	return out
 }

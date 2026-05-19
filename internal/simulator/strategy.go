@@ -79,8 +79,8 @@ type ExperimentalConfig struct {
 // ExperimentalTriggerConfig is one independent experimental entry trigger.
 type ExperimentalTriggerConfig struct {
 	DualFeedDiff       float64 // Min absolute diff from target on both feeds
-	MinAvgFillPrice    float64 // Base min average fill price
-	MinAvgFillFloor    float64 // Lowest allowed dynamic min avg fill
+	StartingMinAvgFill float64 // Starting minimum average fill requirement
+	LowestMinAvgFill   float64 // Lowest allowed minimum average fill after dynamic relaxation
 	RequireSpike       bool    // Whether a spike gate must be met
 	SpikeMinThreshold  float64 // Spike threshold floor (e.g., 3)
 	SpikeVolMultiplier float64 // Dynamic spike threshold: k * recent_5s_vol
@@ -148,18 +148,18 @@ func DefaultStrategyConfig() StrategyConfig {
 			TradeSize:          2.0,
 			OrderbookCheckFreq: 1 * time.Second,
 			TriggerA: ExperimentalTriggerConfig{
-				DualFeedDiff:       30.0,
-				MinAvgFillPrice:    0.95,
-				MinAvgFillFloor:    0.945,
+				DualFeedDiff:       40.0,
+				StartingMinAvgFill: 0.96,
+				LowestMinAvgFill:   0.94,
 				RequireSpike:       true,
-				SpikeMinThreshold:  3.0,
+				SpikeMinThreshold:  4.0,
 				SpikeVolMultiplier: 1.0,
 			},
 			TriggerB: ExperimentalTriggerConfig{
-				DualFeedDiff:    60.0,
-				MinAvgFillPrice: 0.98,
-				MinAvgFillFloor: 0.975,
-				RequireSpike:    false,
+				DualFeedDiff:       70.0,
+				StartingMinAvgFill: 0.98,
+				LowestMinAvgFill:   0.96,
+				RequireSpike:       false,
 			},
 		},
 	}
