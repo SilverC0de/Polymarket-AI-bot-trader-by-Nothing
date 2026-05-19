@@ -28,22 +28,23 @@ type TradeDebugContext struct {
 
 // SimulatedTrade represents a simulated trade entry.
 type SimulatedTrade struct {
-	ID            int
-	MarketID      string
-	EntryTime     time.Time
-	MarketEndTime time.Time
-	Direction     Direction // UP or DOWN
-	PriceToBeat   float64   // BTC price at market start
-	EntryBTCPrice float64   // BTC price when trade was entered
-	EntryReason   string
-	TradeSize     float64            // USD amount ($10)
-	StrategyLabel string             // "default" or "experimental"
-	EntryPrice    float64            // Price paid for the outcome token (e.g., 0.55)
-	RealOrderBook bool               // True if EntryPrice came from real order book, false if simulated
-	Outcome       TradeOutcome       // WIN, LOSE, or PENDING
-	FinalBTCPrice float64            // BTC price at market end
-	PnL           float64            `json:"-"`                       // Profit/Loss in USD
-	DebugContext  *TradeDebugContext `json:"debug_context,omitempty"` // Only populated for losing trades
+	ID                  int
+	MarketID            string
+	EntryTime           time.Time
+	MarketEndTime       time.Time
+	Direction           Direction // UP or DOWN
+	PriceToBeat         float64   // BTC price at market start
+	EntryBTCPrice       float64   // BTC price when trade was entered
+	EntryReason         string
+	TradeSize           float64            // USD amount ($10)
+	StrategyLabel       string             // "default" or "experimental"
+	ExperimentalTrigger string             `json:"experimental_trigger,omitempty"` // "trigger1"/"trigger2" for experimental trades
+	EntryPrice          float64            // Price paid for the outcome token (e.g., 0.55)
+	RealOrderBook       bool               // True if EntryPrice came from real order book, false if simulated
+	Outcome             TradeOutcome       // WIN, LOSE, or PENDING
+	FinalBTCPrice       float64            // BTC price at market end
+	PnL                 float64            `json:"-"`                       // Profit/Loss in USD
+	DebugContext        *TradeDebugContext `json:"debug_context,omitempty"` // Only populated for losing trades
 }
 
 // SkippedMarket records a market that was skipped with reason.
@@ -69,6 +70,17 @@ type SimulationStats struct {
 	TotalPnL             float64
 	WinRate              float64
 	SkipReasons          map[SkipReason]int
+	ExperimentalTriggers map[string]ExperimentalTriggerStats
+}
+
+// ExperimentalTriggerStats tracks trigger-level funnel and outcomes.
+type ExperimentalTriggerStats struct {
+	Arms    int     `json:"arms"`
+	Entries int     `json:"entries"`
+	Wins    int     `json:"wins"`
+	Losses  int     `json:"losses"`
+	Pending int     `json:"pending"`
+	WinRate float64 `json:"win_rate"`
 }
 
 // ExperimentalMarketDebug exposes per-market diagnostics for the experimental strategy.
@@ -90,6 +102,12 @@ type ExperimentalMarketDebug struct {
 	BaseCoinbasePrice   float64    `json:"base_coinbase_price"`
 	SpikeFromBase       float64    `json:"spike_from_base"`
 	SpikeQualified      bool       `json:"spike_qualified"`
+	Recent5sVolatility  float64    `json:"recent_5s_volatility"`
+	Trigger1MinAvg      float64    `json:"trigger1_min_avg"`
+	Trigger2MinAvg      float64    `json:"trigger2_min_avg"`
+	Trigger1SpikeNeed   float64    `json:"trigger1_spike_need"`
+	Trigger1Qualified   bool       `json:"trigger1_qualified"`
+	Trigger2Qualified   bool       `json:"trigger2_qualified"`
 	LastOrderbookCheck  string     `json:"last_orderbook_check,omitempty"`
 	EnteredTrade        bool       `json:"entered_trade"`
 	SkipReason          SkipReason `json:"skip_reason,omitempty"`
@@ -116,19 +134,20 @@ type LiveTradeFunc func(ctx context.Context, tokenID string, direction Direction
 
 // Engine runs the trading simulation.
 type Engine struct {
-	mu             sync.RWMutex
-	strategy       *Strategy
-	pmClient       *polymarket.Client // Polymarket client for fetching real order book prices
-	trades         []SimulatedTrade
-	skippedMarkets []SkippedMarket
-	marketStates   map[string]*MarketState
-	marketOutcomes []MarketOutcome
-	tradeCounter   int
-	startTime      time.Time
-	onTradeUpdate  func(trade SimulatedTrade)
-	onSkip         func(skip SkippedMarket)
-	onMarketEnd    func(outcome MarketOutcome)
-	onLiveTrade    LiveTradeFunc // nil when not in live-trading mode
+	mu                      sync.RWMutex
+	strategy                *Strategy
+	pmClient                *polymarket.Client // Polymarket client for fetching real order book prices
+	trades                  []SimulatedTrade
+	skippedMarkets          []SkippedMarket
+	marketStates            map[string]*MarketState
+	marketOutcomes          []MarketOutcome
+	tradeCounter            int
+	startTime               time.Time
+	experimentalTriggerArms map[string]int
+	onTradeUpdate           func(trade SimulatedTrade)
+	onSkip                  func(skip SkippedMarket)
+	onMarketEnd             func(outcome MarketOutcome)
+	onLiveTrade             LiveTradeFunc // nil when not in live-trading mode
 }
 
 // NewEngine creates a new simulation engine.
@@ -142,6 +161,10 @@ func NewEngine(strategy *Strategy, pmClient *polymarket.Client) *Engine {
 		marketStates:   make(map[string]*MarketState),
 		marketOutcomes: make([]MarketOutcome, 0),
 		startTime:      time.Now(),
+		experimentalTriggerArms: map[string]int{
+			"trigger1": 0,
+			"trigger2": 0,
+		},
 	}
 }
 
@@ -289,7 +312,7 @@ func (e *Engine) ProcessPriceUpdate(btcPrice float64, timestamp time.Time) {
 		}
 
 		if direction != DirectionNone {
-			e.enterTradeLocked(state, direction, btcPrice, timestamp, reason, e.strategy.config.TradeSize, "default")
+			e.enterTradeLocked(state, direction, btcPrice, timestamp, reason, e.strategy.config.TradeSize, "default", "")
 		}
 	}
 }
@@ -313,14 +336,22 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 		if timeToEnd <= 0 || timeToEnd > exp.Window {
 			state.ExperimentalArmed = false
 			state.ExperimentalAvgPriceOK = false
+			state.ExperimentalTrigger1Armed = false
+			state.ExperimentalTrigger2Armed = false
 			continue
 		}
 
 		pmDiff := polymarketPrice - state.PriceToBeat
 		cbDiff := coinbasePrice - state.PriceToBeat
-		if math.Abs(pmDiff) < exp.DualFeedDiff || math.Abs(cbDiff) < exp.DualFeedDiff {
+		absPMDiff := math.Abs(pmDiff)
+		absCBDiff := math.Abs(cbDiff)
+		trigger1DualOK := absPMDiff >= exp.TriggerA.DualFeedDiff && absCBDiff >= exp.TriggerA.DualFeedDiff
+		trigger2DualOK := absPMDiff >= exp.TriggerB.DualFeedDiff && absCBDiff >= exp.TriggerB.DualFeedDiff
+		if !trigger1DualOK && !trigger2DualOK {
 			state.ExperimentalArmed = false
 			state.ExperimentalAvgPriceOK = false
+			state.ExperimentalTrigger1Armed = false
+			state.ExperimentalTrigger2Armed = false
 			continue
 		}
 
@@ -331,13 +362,24 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 		if (pmDiff > 0 && cbDiff < 0) || (pmDiff < 0 && cbDiff > 0) {
 			state.ExperimentalArmed = false
 			state.ExperimentalAvgPriceOK = false
+			state.ExperimentalTrigger1Armed = false
+			state.ExperimentalTrigger2Armed = false
 			continue
 		}
+		if trigger1DualOK && !state.ExperimentalTrigger1Armed {
+			e.experimentalTriggerArms["trigger1"]++
+		}
+		if trigger2DualOK && !state.ExperimentalTrigger2Armed {
+			e.experimentalTriggerArms["trigger2"]++
+		}
+		state.ExperimentalTrigger1Armed = trigger1DualOK
+		state.ExperimentalTrigger2Armed = trigger2DualOK
 
 		if !state.ExperimentalArmed || state.ExperimentalDirection != direction {
 			state.ExperimentalArmed = true
 			state.ExperimentalDirection = direction
 			state.ExperimentalBaseCoinbase = coinbasePrice
+			state.ExperimentalLastFillPrice = 0
 			state.ExperimentalAvgPriceOK = false
 			state.ExperimentalLastOBCheck = time.Time{}
 		}
@@ -347,7 +389,11 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 			entryPrice, ok := e.getRealEntryPrice(ctx, state, direction, exp.TradeSize)
 			cancel()
-			state.ExperimentalAvgPriceOK = ok && entryPrice >= exp.MinAvgFillPrice
+			state.ExperimentalLastFillPrice = 0
+			state.ExperimentalAvgPriceOK = ok
+			if ok {
+				state.ExperimentalLastFillPrice = entryPrice
+			}
 		}
 		if !state.ExperimentalAvgPriceOK {
 			continue
@@ -357,12 +403,38 @@ func (e *Engine) ProcessCoinbaseUpdate(coinbasePrice, polymarketPrice float64, t
 		if direction == DirectionDown {
 			spike = state.ExperimentalBaseCoinbase - coinbasePrice
 		}
-		if spike < exp.SpikeThreshold {
+		entryPrice := state.ExperimentalLastFillPrice
+		minAbsDiff := absPMDiff
+		if absCBDiff < minAbsDiff {
+			minAbsDiff = absCBDiff
+		}
+		recentVol := recent5sVolatility(state.PriceHistory, timestamp)
+		trigger1MinAvg := dynamicMinAvgFill(exp.TriggerA, timeToEnd, minAbsDiff, exp.Window)
+		trigger2MinAvg := dynamicMinAvgFill(exp.TriggerB, timeToEnd, minAbsDiff, exp.Window)
+		trigger1SpikeNeed := dynamicSpikeThreshold(exp.TriggerA, recentVol)
+		triggerAReady := trigger1DualOK &&
+			entryPrice >= trigger1MinAvg &&
+			(!exp.TriggerA.RequireSpike || spike >= trigger1SpikeNeed)
+
+		triggerBReady := trigger2DualOK &&
+			entryPrice >= trigger2MinAvg &&
+			(!exp.TriggerB.RequireSpike || spike >= dynamicSpikeThreshold(exp.TriggerB, recentVol))
+
+		if triggerBReady {
+			reason := fmt.Sprintf(
+				"experimental trigger2: pm_diff=$%.2f cb_diff=$%.2f avg=%.4f>=dyn_min=%.4f tte=%s vol5s=$%.2f",
+				absPMDiff, absCBDiff, entryPrice, trigger2MinAvg, timeToEnd.Round(time.Second), recentVol,
+			)
+			e.enterTradeLocked(state, direction, coinbasePrice, timestamp, reason, exp.TradeSize, "experimental", "trigger2")
 			continue
 		}
-
-		reason := fmt.Sprintf("experimental: dual-feed >=$%.0f from target, avg>=%.2f, coinbase spike $%.2f", exp.DualFeedDiff, exp.MinAvgFillPrice, spike)
-		e.enterTradeLocked(state, direction, coinbasePrice, timestamp, reason, exp.TradeSize, "experimental")
+		if triggerAReady {
+			reason := fmt.Sprintf(
+				"experimental trigger1: pm_diff=$%.2f cb_diff=$%.2f avg=%.4f>=dyn_min=%.4f spike=$%.2f>=need=$%.2f tte=%s vol5s=$%.2f",
+				absPMDiff, absCBDiff, entryPrice, trigger1MinAvg, spike, trigger1SpikeNeed, timeToEnd.Round(time.Second), recentVol,
+			)
+			e.enterTradeLocked(state, direction, coinbasePrice, timestamp, reason, exp.TradeSize, "experimental", "trigger1")
+		}
 	}
 }
 
@@ -392,6 +464,73 @@ func potentialProfit(amountUSD, entryPrice float64) float64 {
 	return (1 - entryPrice) * shares
 }
 
+func clamp(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func dynamicMinAvgFill(cfg ExperimentalTriggerConfig, timeToEnd time.Duration, absDiff float64, window time.Duration) float64 {
+	if cfg.MinAvgFillFloor <= 0 || cfg.MinAvgFillFloor >= cfg.MinAvgFillPrice {
+		return cfg.MinAvgFillPrice
+	}
+	var timeProgress float64
+	if window > 0 {
+		timeProgress = clamp((float64(window-timeToEnd))/float64(window), 0, 1)
+	}
+	// Diff progression reaches 1x at 2x threshold distance, so very large dislocations
+	// relax fill requirements more than marginal threshold breaches.
+	diffProgress := clamp((absDiff-cfg.DualFeedDiff)/cfg.DualFeedDiff, 0, 1)
+	relax := (cfg.MinAvgFillPrice - cfg.MinAvgFillFloor) * ((0.6 * timeProgress) + (0.4 * diffProgress))
+	out := cfg.MinAvgFillPrice - relax
+	if out < cfg.MinAvgFillFloor {
+		return cfg.MinAvgFillFloor
+	}
+	return out
+}
+
+func dynamicSpikeThreshold(cfg ExperimentalTriggerConfig, recentVol float64) float64 {
+	if !cfg.RequireSpike {
+		return 0
+	}
+	return math.Max(cfg.SpikeMinThreshold, cfg.SpikeVolMultiplier*recentVol)
+}
+
+func recent5sVolatility(history []PriceSnapshot, now time.Time) float64 {
+	if len(history) < 2 {
+		return 0
+	}
+	cutoff := now.Add(-5 * time.Second)
+	start := 0
+	for i := len(history) - 1; i >= 0; i-- {
+		if !history[i].Timestamp.Before(cutoff) {
+			start = i
+			continue
+		}
+		start = i + 1
+		break
+	}
+	if start >= len(history)-1 {
+		return 0
+	}
+	minP := history[start].BTCPrice
+	maxP := history[start].BTCPrice
+	for i := start + 1; i < len(history); i++ {
+		p := history[i].BTCPrice
+		if p < minP {
+			minP = p
+		}
+		if p > maxP {
+			maxP = p
+		}
+	}
+	return maxP - minP
+}
+
 func (e *Engine) hasPendingTradeLocked() bool {
 	for _, trade := range e.trades {
 		if trade.Outcome == OutcomePending {
@@ -417,7 +556,13 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 		}
 		pmDiff := polymarketPrice - state.PriceToBeat
 		cbDiff := coinbasePrice - state.PriceToBeat
-		dualFeedOK := math.Abs(pmDiff) >= exp.DualFeedDiff && math.Abs(cbDiff) >= exp.DualFeedDiff
+		absPMDiff := math.Abs(pmDiff)
+		absCBDiff := math.Abs(cbDiff)
+		minDualFeedDiff := exp.TriggerA.DualFeedDiff
+		if exp.TriggerB.DualFeedDiff < minDualFeedDiff {
+			minDualFeedDiff = exp.TriggerB.DualFeedDiff
+		}
+		dualFeedOK := absPMDiff >= minDualFeedDiff && absCBDiff >= minDualFeedDiff
 		sameDirection := (pmDiff > 0 && cbDiff > 0) || (pmDiff < 0 && cbDiff < 0)
 		withinWindow := true
 
@@ -435,7 +580,24 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 				spike = state.ExperimentalBaseCoinbase - coinbasePrice
 			}
 		}
-		spikeOK := spike >= exp.SpikeThreshold
+		recentVol := recent5sVolatility(state.PriceHistory, now)
+		minAbsDiff := absPMDiff
+		if absCBDiff < minAbsDiff {
+			minAbsDiff = absCBDiff
+		}
+		trigger1MinAvg := dynamicMinAvgFill(exp.TriggerA, timeToEnd, minAbsDiff, exp.Window)
+		trigger2MinAvg := dynamicMinAvgFill(exp.TriggerB, timeToEnd, minAbsDiff, exp.Window)
+		trigger1SpikeNeed := dynamicSpikeThreshold(exp.TriggerA, recentVol)
+		spikeOK := spike >= trigger1SpikeNeed
+		triggerAReady := absPMDiff >= exp.TriggerA.DualFeedDiff &&
+			absCBDiff >= exp.TriggerA.DualFeedDiff &&
+			state.ExperimentalLastFillPrice >= trigger1MinAvg &&
+			(!exp.TriggerA.RequireSpike || spike >= trigger1SpikeNeed)
+		triggerBReady := absPMDiff >= exp.TriggerB.DualFeedDiff &&
+			absCBDiff >= exp.TriggerB.DualFeedDiff &&
+			state.ExperimentalLastFillPrice >= trigger2MinAvg &&
+			(!exp.TriggerB.RequireSpike || spike >= dynamicSpikeThreshold(exp.TriggerB, recentVol))
+		anyTriggerReady := triggerAReady || triggerBReady
 
 		blocked := ""
 		switch {
@@ -448,15 +610,15 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 		case polymarketPrice <= 0 || coinbasePrice <= 0:
 			blocked = "missing_spot_price"
 		case !dualFeedOK:
-			blocked = "dual_feed_not_30_from_target"
+			blocked = "dual_feed_below_min_threshold"
 		case !sameDirection:
 			blocked = "feeds_not_same_direction"
 		case !state.ExperimentalAvgPriceOK:
 			blocked = "avg_price_below_min_or_unavailable"
 		case !state.ExperimentalArmed:
 			blocked = "not_armed"
-		case !spikeOK:
-			blocked = "coinbase_spike_below_threshold"
+		case !anyTriggerReady:
+			blocked = "no_trigger_qualified"
 		default:
 			blocked = ""
 		}
@@ -484,6 +646,12 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 			BaseCoinbasePrice:   state.ExperimentalBaseCoinbase,
 			SpikeFromBase:       spike,
 			SpikeQualified:      spikeOK,
+			Recent5sVolatility:  recentVol,
+			Trigger1MinAvg:      trigger1MinAvg,
+			Trigger2MinAvg:      trigger2MinAvg,
+			Trigger1SpikeNeed:   trigger1SpikeNeed,
+			Trigger1Qualified:   triggerAReady,
+			Trigger2Qualified:   triggerBReady,
 			LastOrderbookCheck:  lastOB,
 			EnteredTrade:        state.EnteredTrade,
 			SkipReason:          state.SkipReason,
@@ -494,7 +662,7 @@ func (e *Engine) GetExperimentalDebug(polymarketPrice, coinbasePrice float64, no
 	return out
 }
 
-func (e *Engine) enterTradeLocked(state *MarketState, direction Direction, btcPrice float64, timestamp time.Time, reason string, tradeSize float64, strategyLabel string) bool {
+func (e *Engine) enterTradeLocked(state *MarketState, direction Direction, btcPrice float64, timestamp time.Time, reason string, tradeSize float64, strategyLabel, experimentalTrigger string) bool {
 	var entryPrice float64
 	var realOrderBook bool
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -530,19 +698,20 @@ func (e *Engine) enterTradeLocked(state *MarketState, direction Direction, btcPr
 	entryRecentMove := e.strategy.calculateRecentMove(state.PriceHistory, direction)
 
 	trade := SimulatedTrade{
-		ID:            e.tradeCounter,
-		MarketID:      state.MarketID,
-		EntryTime:     timestamp,
-		MarketEndTime: state.EndTime,
-		Direction:     direction,
-		PriceToBeat:   state.PriceToBeat,
-		EntryBTCPrice: btcPrice,
-		EntryReason:   reason,
-		TradeSize:     tradeSize,
-		StrategyLabel: strategyLabel,
-		EntryPrice:    entryPrice,
-		RealOrderBook: realOrderBook,
-		Outcome:       OutcomePending,
+		ID:                  e.tradeCounter,
+		MarketID:            state.MarketID,
+		EntryTime:           timestamp,
+		MarketEndTime:       state.EndTime,
+		Direction:           direction,
+		PriceToBeat:         state.PriceToBeat,
+		EntryBTCPrice:       btcPrice,
+		EntryReason:         reason,
+		TradeSize:           tradeSize,
+		StrategyLabel:       strategyLabel,
+		ExperimentalTrigger: experimentalTrigger,
+		EntryPrice:          entryPrice,
+		RealOrderBook:       realOrderBook,
+		Outcome:             OutcomePending,
 		DebugContext: &TradeDebugContext{
 			EntryMomentum:   entryMomentum,
 			EntryRecentMove: entryRecentMove,
@@ -759,6 +928,10 @@ func (e *Engine) GetStats() SimulationStats {
 		TotalTradesEntered:   len(e.trades),
 		TotalMarketsSkipped:  len(e.skippedMarkets),
 		SkipReasons:          make(map[SkipReason]int),
+		ExperimentalTriggers: make(map[string]ExperimentalTriggerStats),
+	}
+	for trigger, arms := range e.experimentalTriggerArms {
+		stats.ExperimentalTriggers[trigger] = ExperimentalTriggerStats{Arms: arms}
 	}
 
 	for _, trade := range e.trades {
@@ -770,6 +943,27 @@ func (e *Engine) GetStats() SimulationStats {
 			stats.TotalLosses++
 		case OutcomePending:
 			stats.TotalPending++
+		}
+		if trade.StrategyLabel == "experimental" {
+			trigger := trade.ExperimentalTrigger
+			if trigger == "" {
+				trigger = "unknown"
+			}
+			t := stats.ExperimentalTriggers[trigger]
+			t.Entries++
+			switch trade.Outcome {
+			case OutcomeWin:
+				t.Wins++
+			case OutcomeLose:
+				t.Losses++
+			case OutcomePending:
+				t.Pending++
+			}
+			resolvedTrigger := t.Wins + t.Losses
+			if resolvedTrigger > 0 {
+				t.WinRate = float64(t.Wins) / float64(resolvedTrigger) * 100
+			}
+			stats.ExperimentalTriggers[trigger] = t
 		}
 	}
 

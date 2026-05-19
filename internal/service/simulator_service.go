@@ -133,13 +133,14 @@ type SimulatorStatus struct {
 
 // SimStats contains simulation statistics.
 type SimStats struct {
-	TotalTrades  int            `json:"total_trades"`
-	TotalSkipped int            `json:"total_skipped"`
-	TotalWins    int            `json:"wins"`
-	TotalLosses  int            `json:"losses"`
-	TotalPending int            `json:"pending"`
-	WinRate      float64        `json:"win_rate"`
-	SkipReasons  map[string]int `json:"skip_reasons"`
+	TotalTrades          int                                           `json:"total_trades"`
+	TotalSkipped         int                                           `json:"total_skipped"`
+	TotalWins            int                                           `json:"wins"`
+	TotalLosses          int                                           `json:"losses"`
+	TotalPending         int                                           `json:"pending"`
+	WinRate              float64                                       `json:"win_rate"`
+	SkipReasons          map[string]int                                `json:"skip_reasons"`
+	ExperimentalTriggers map[string]simulator.ExperimentalTriggerStats `json:"experimental_triggers,omitempty"`
 }
 
 // ExperimentalDebugEvent is persisted as kind "experimental" for history/audit.
@@ -610,13 +611,14 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 		PriceFeedHealthy: healthy,
 		WSConnected:      wsConnected,
 		Stats: SimStats{
-			TotalTrades:  stats.TotalTradesEntered,
-			TotalSkipped: stats.TotalMarketsSkipped,
-			TotalWins:    stats.TotalWins,
-			TotalLosses:  stats.TotalLosses,
-			TotalPending: stats.TotalPending,
-			WinRate:      stats.WinRate,
-			SkipReasons:  make(map[string]int),
+			TotalTrades:          stats.TotalTradesEntered,
+			TotalSkipped:         stats.TotalMarketsSkipped,
+			TotalWins:            stats.TotalWins,
+			TotalLosses:          stats.TotalLosses,
+			TotalPending:         stats.TotalPending,
+			WinRate:              stats.WinRate,
+			SkipReasons:          make(map[string]int),
+			ExperimentalTriggers: make(map[string]simulator.ExperimentalTriggerStats),
 		},
 		Trades:            s.engine.GetTrades(),
 		Outcomes:          s.engine.GetMarketOutcomes(),
@@ -625,6 +627,9 @@ func (s *SimulatorService) GetStatus(ctx context.Context, historyLimit int) Simu
 
 	for reason, count := range stats.SkipReasons {
 		status.Stats.SkipReasons[string(reason)] = count
+	}
+	for trigger, tstats := range stats.ExperimentalTriggers {
+		status.Stats.ExperimentalTriggers[trigger] = tstats
 	}
 
 	if hasTarget {

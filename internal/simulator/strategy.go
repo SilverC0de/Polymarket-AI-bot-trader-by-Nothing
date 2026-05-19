@@ -57,21 +57,33 @@ type MarketState struct {
 	UpTokenID      string // Token ID for "Up" outcome (YES)
 	DownTokenID    string // Token ID for "Down" outcome (NO)
 	// Experimental strategy state (last-30s spike entry).
-	ExperimentalArmed        bool
-	ExperimentalDirection    Direction
-	ExperimentalBaseCoinbase float64
-	ExperimentalLastOBCheck  time.Time
-	ExperimentalAvgPriceOK   bool
+	ExperimentalArmed         bool
+	ExperimentalDirection     Direction
+	ExperimentalBaseCoinbase  float64
+	ExperimentalLastOBCheck   time.Time
+	ExperimentalLastFillPrice float64
+	ExperimentalAvgPriceOK    bool
+	ExperimentalTrigger1Armed bool
+	ExperimentalTrigger2Armed bool
 }
 
 // ExperimentalConfig holds late-window spike-entry parameters.
 type ExperimentalConfig struct {
-	Window             time.Duration // Late entry window before market end
-	DualFeedDiff       float64       // Min absolute diff from target on both feeds
-	SpikeThreshold     float64       // Required Coinbase move after arming
-	MinAvgFillPrice    float64       // Min average fill price required
-	TradeSize          float64       // Trade size in USD
-	OrderbookCheckFreq time.Duration // How often to refresh order book qualification
+	Window             time.Duration             // Late entry window before market end
+	TradeSize          float64                   // Trade size in USD
+	OrderbookCheckFreq time.Duration             // How often to refresh order book qualification
+	TriggerA           ExperimentalTriggerConfig // Trigger 1: dual-feed + avg + spike
+	TriggerB           ExperimentalTriggerConfig // Trigger 2: stronger dual-feed + avg only
+}
+
+// ExperimentalTriggerConfig is one independent experimental entry trigger.
+type ExperimentalTriggerConfig struct {
+	DualFeedDiff       float64 // Min absolute diff from target on both feeds
+	MinAvgFillPrice    float64 // Base min average fill price
+	MinAvgFillFloor    float64 // Lowest allowed dynamic min avg fill
+	RequireSpike       bool    // Whether a spike gate must be met
+	SpikeMinThreshold  float64 // Spike threshold floor (e.g., 3)
+	SpikeVolMultiplier float64 // Dynamic spike threshold: k * recent_5s_vol
 }
 
 // StrategyConfig holds the trading strategy parameters.
@@ -133,11 +145,22 @@ func DefaultStrategyConfig() StrategyConfig {
 		MinAdverseNetMove: 5.0, // Skip if price net moved >$5 against the trade direction over 60s
 		Experimental: ExperimentalConfig{
 			Window:             30 * time.Second,
-			DualFeedDiff:       30.0,
-			SpikeThreshold:     5.0,
-			MinAvgFillPrice:    0.96,
 			TradeSize:          2.0,
 			OrderbookCheckFreq: 1 * time.Second,
+			TriggerA: ExperimentalTriggerConfig{
+				DualFeedDiff:       30.0,
+				MinAvgFillPrice:    0.95,
+				MinAvgFillFloor:    0.945,
+				RequireSpike:       true,
+				SpikeMinThreshold:  3.0,
+				SpikeVolMultiplier: 1.0,
+			},
+			TriggerB: ExperimentalTriggerConfig{
+				DualFeedDiff:    60.0,
+				MinAvgFillPrice: 0.98,
+				MinAvgFillFloor: 0.975,
+				RequireSpike:    false,
+			},
 		},
 	}
 }
